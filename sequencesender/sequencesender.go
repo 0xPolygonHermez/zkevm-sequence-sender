@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	ethtxmantypes "github.com/0xPolygonHermez/zkevm-ethtx-manager/config/types"
+	newetherman "github.com/0xPolygonHermez/zkevm-ethtx-manager/etherman"
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
@@ -62,7 +63,6 @@ type ethTxData struct {
 // New inits sequence sender
 func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 	log.Infof("CONFIG: %+v", cfg)
-
 	testCfg := ethtxmanager.Config{
 		FrequencyToMonitorTxs: ethtxmantypes.Duration{Duration: 1 * time.Second},
 		WaitTxToBeMined:       ethtxmantypes.Duration{Duration: 2 * time.Minute}, // nolint:gomnd
@@ -74,12 +74,13 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		GasPriceMarginFactor: 1,
 		MaxGasPriceLimit:     0,
 		From:                 common.HexToAddress("0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"),
-		// Etherman: cfg.EthTxManager{
-		// 	URL:              "http://localhost:8545",
-		// 	MultiGasProvider: false,
-		// 	L1ChainID:        1337, // nolint:gomnd
-		// },
+		Etherman: newetherman.Config{
+			URL:              "http://localhost:8545",
+			MultiGasProvider: false,
+			L1ChainID:        1337, // nolint:gomnd
+		},
 	}
+	log.Infof("TESTCONFIG: %+v", testCfg)
 
 	// Create sequencesender
 	s := SequenceSender{
