@@ -145,7 +145,7 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	// Set starting point of the streaming
 	s.fromStreamBatch = s.latestVirtualBatch
 	bookmark := []byte{state.BookMarkTypeBatch}
-	bookmark = binary.LittleEndian.AppendUint64(bookmark, s.fromStreamBatch)
+	bookmark = binary.BigEndian.AppendUint64(bookmark, s.fromStreamBatch)
 	s.streamClient.FromBookmark = bookmark
 	log.Debugf("[SeqSender] stream client from bookmark %v", bookmark)
 
@@ -170,16 +170,15 @@ func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
 	for hash, data := range s.ethTransactions {
 		txResult, err := s.ethTxManager.Result(ctx, hash)
 		if err == ethtxmanager.ErrNotFound {
-			log.Debugf("[SeqSender] transaction %v does not exist in memory structure. Removing it", hash)
-			delete(s.ethTransactions, hash)
+			log.Debugf("[SeqSender] transaction %v does not exist in L1. Removing it", hash)
+			// delete(s.ethTransactions, hash)
+			data.Status = "notexists"
+		} else if err != nil {
+			log.Errorf("[SeqSender] Error getting result for tx %v: %v", hash, err)
+		} else {
+			// Update tx status
+			data.Status = string(txResult.Status)
 		}
-		if err != nil {
-			log.Errorf("[SeqSender] Error getting result from tx %v: %v", hash, err)
-			return err
-		}
-
-		// Update tx status
-		data.Status = string(txResult.Status)
 
 		// TODO: Manage according to the state
 	}
@@ -189,12 +188,14 @@ func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
 }
 
 func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
+	// Get all results
 	results, err := s.ethTxManager.ResultsByStatus(ctx, nil)
 	if err != nil {
 		log.Errorf("[SeqSender] Error getting results for all tx: %v", err)
 		return err
 	}
 
+	// Check and update tx status
 	for _, result := range results {
 		txSequence, exists := s.ethTransactions[result.ID]
 		if exists {
@@ -204,18 +205,34 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 			}
 		} else {
 			log.Debugf("[SeqSender] transaction %v does not exist in memory structure. Adding it", result.ID)
+			// TODO: from/to batch info?
 			s.ethTransactions[result.ID] = ethTxData{
 				Status: result.Status.String(),
 			}
 		}
 	}
+
+	// Save updated sequences
+	err = s.saveSentSequencesTransactions()
+	if err != nil {
+		log.Fatalf("[SeqSender] error saving tx sequence sent, error: %v", err)
+	}
+
 	return nil
 }
 
 func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Ticker) {
+	// Update latest virtual batch
+	log.Debugf("[SeqSender] updating virtual batch")
+	err := s.updateLatestVirtualBatch()
+	if err != nil {
+		waitTick(ctx, ticker)
+		return
+	}
+
 	// Check and update the state of transactions
 	log.Debugf("[SeqSender] updating tx results")
-	err := s.updateEthTxResults(ctx)
+	err = s.updateEthTxResults(ctx)
 	if err != nil {
 		waitTick(ctx, ticker)
 		return
@@ -240,22 +257,21 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	lastSequence := sequences[sequenceCount-1]
 	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
 
-	data := make([]byte, 0)
-	for b := firstSequence.BatchNumber; b <= lastSequence.BatchNumber; b++ {
-		data = append(data, s.sequenceData[b].batch.BatchL2Data...)
-	}
-	to := common.HexToAddress("0x0001")
+	// data := make([]byte, 0)
+	// for b := firstSequence.BatchNumber; b <= lastSequence.BatchNumber; b++ {
+	// 	data = append(data, s.sequenceData[b].batch.BatchL2Data...)
+	// }
+	// to := common.HexToAddress("0x0001")
 
 	// Add sequence
-	// to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
-	// if err != nil {
-	// 	log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
-	// 	return
-	// }
+	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
+	if err != nil {
+		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
+		return
+	}
 
 	// Add sequence tx
-	nonce := uint64(0)
-	txHash, err := s.ethTxManager.Add(ctx, &to, &nonce, big.NewInt(1), data)
+	txHash, err := s.ethTxManager.Add(ctx, to, nil, big.NewInt(1), data)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
 		return
@@ -283,12 +299,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 // If the array is empty, it doesn't necessarily mean that there are no sequences to be sent,
 // it could be that it's not worth it to do so yet.
 func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequence, error) {
-	// Update latest virtual batch
-	err := s.updateLatestVirtualBatch()
-	if err != nil {
-		return nil, err
-	}
-
 	// Add sequences until too big for a single L1 tx or last batch is reached
 	sequences := []types.Sequence{}
 	for i := 0; i < len(s.sequenceList); i++ {
@@ -315,7 +325,6 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 
 		// Check if can be send
 		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
-		log.Debugf("[SeqSender] estimated gas L1, tx size %d, result %v", tx.Size(), err)
 
 		if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
 			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
@@ -569,13 +578,18 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 // closeSequenceBatch closes the current batch
 func (s *SequenceSender) closeSequenceBatch() error {
 	s.mutexSequence.Lock()
-	s.sequenceData[s.wipBatch].batchClosed = true
+	log.Debugf("[SeqSender] Closing batch %d", s.wipBatch)
 
-	var err error
-	s.sequenceData[s.wipBatch].batch.BatchL2Data, err = state.EncodeBatchV2(s.sequenceData[s.wipBatch].batchRaw)
-	if err != nil {
-		log.Errorf("[SeqSender] error closing and encoding the batch %d: %v", s.wipBatch, err)
-		return err
+	data := s.sequenceData[s.wipBatch]
+	if data != nil {
+		data.batchClosed = true
+
+		var err error
+		data.batch.BatchL2Data, err = state.EncodeBatchV2(data.batchRaw)
+		if err != nil {
+			log.Errorf("[SeqSender] error closing and encoding the batch %d: %v", s.wipBatch, err)
+			return err
+		}
 	}
 
 	s.mutexSequence.Unlock()
@@ -628,19 +642,15 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 	wipBatchRaw.Blocks = append(wipBatchRaw.Blocks, newBlockRaw)
 
 	// Get current L2 block
-	blockIndex, blockRaw := s.getWipL2Block()
+	_, blockRaw := s.getWipL2Block()
 	if blockRaw == nil {
 		log.Debugf("[SeqSender] wip block %d not found!")
 		return
 	}
 
 	// Fill in data
-	if blockIndex > 0 {
-		blockRaw.DeltaTimestamp = uint32(l2BlockStart.Timestamp) - wipBatchRaw.Blocks[0].DeltaTimestamp
-	} else {
-		blockRaw.DeltaTimestamp = uint32(l2BlockStart.Timestamp)
-	}
-	blockRaw.IndexL1InfoTree = 0 //TODO: how to obtain this value
+	blockRaw.DeltaTimestamp = l2BlockStart.DeltaTimestamp
+	blockRaw.IndexL1InfoTree = l2BlockStart.L1InfoTreeIndex
 	s.mutexSequence.Unlock()
 }
 
