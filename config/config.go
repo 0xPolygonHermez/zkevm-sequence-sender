@@ -65,6 +65,8 @@ type Config struct {
 	EthTxManager newtxman.Config
 	// Configuration of the sequence sender service
 	SequenceSender sequencesender.Config
+	// Configuration of the genesis of the network. This is used to known the initial state of the network
+	NetworkConfig NetworkConfig
 }
 
 // Default parses the default configuration values.
@@ -84,7 +86,7 @@ func Default() (*Config, error) {
 }
 
 // Load loads the configuration
-func Load(ctx *cli.Context) (*Config, error) {
+func Load(ctx *cli.Context, loadNetworkConfig bool) (*Config, error) {
 	cfg, err := Default()
 	if err != nil {
 		return nil, err
@@ -125,5 +127,9 @@ func Load(ctx *cli.Context) (*Config, error) {
 		return nil, err
 	}
 
+	if loadNetworkConfig {
+		// Load genesis parameters
+		cfg.loadNetworkConfig(ctx)
+	}
 	return cfg, nil
 }

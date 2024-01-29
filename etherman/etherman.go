@@ -185,7 +185,7 @@ type Client struct {
 }
 
 // NewClient creates a new etherman.
-func NewClient(cfg Config) (*Client, error) {
+func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	// Connect to ethereum node
 	ethClient, err := ethclient.Dial(cfg.URL)
 	if err != nil {
@@ -193,31 +193,28 @@ func NewClient(cfg Config) (*Client, error) {
 		return nil, err
 	}
 	// Create smc clients
-	/*
-		zkevm, err := polygonzkevm.NewPolygonzkevm(l1Config.ZkEVMAddr, ethClient)
-		if err != nil {
-			return nil, err
-		}
-		oldZkevm, err := oldpolygonzkevm.NewOldpolygonzkevm(l1Config.RollupManagerAddr, ethClient)
-		if err != nil {
-			return nil, err
-		}
-		rollupManager, err := polygonrollupmanager.NewPolygonrollupmanager(l1Config.RollupManagerAddr, ethClient)
-		if err != nil {
-			return nil, err
-		}
-		globalExitRoot, err := polygonzkevmglobalexitroot.NewPolygonzkevmglobalexitroot(l1Config.GlobalExitRootManagerAddr, ethClient)
-		if err != nil {
-			return nil, err
-		}
-		pol, err := pol.NewPol(l1Config.PolAddr, ethClient)
-		if err != nil {
-			return nil, err
-		}
-	*/
+	zkevm, err := polygonzkevm.NewPolygonzkevm(l1Config.ZkEVMAddr, ethClient)
+	if err != nil {
+		return nil, err
+	}
+	oldZkevm, err := oldpolygonzkevm.NewOldpolygonzkevm(l1Config.RollupManagerAddr, ethClient)
+	if err != nil {
+		return nil, err
+	}
+	rollupManager, err := polygonrollupmanager.NewPolygonrollupmanager(l1Config.RollupManagerAddr, ethClient)
+	if err != nil {
+		return nil, err
+	}
+	globalExitRoot, err := polygonzkevmglobalexitroot.NewPolygonzkevmglobalexitroot(l1Config.GlobalExitRootManagerAddr, ethClient)
+	if err != nil {
+		return nil, err
+	}
+	pol, err := pol.NewPol(l1Config.PolAddr, ethClient)
+	if err != nil {
+		return nil, err
+	}
 	var scAddresses []common.Address
-
-	// scAddresses = append(scAddresses, l1Config.ZkEVMAddr, l1Config.RollupManagerAddr, l1Config.GlobalExitRootManagerAddr)
+	scAddresses = append(scAddresses, l1Config.ZkEVMAddr, l1Config.RollupManagerAddr, l1Config.GlobalExitRootManagerAddr)
 
 	gProviders := []ethereum.GasPricer{ethClient}
 	if cfg.MultiGasProvider {
@@ -229,30 +226,29 @@ func NewClient(cfg Config) (*Client, error) {
 		}
 		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
 	}
-	/*
-		// Get RollupID
-		rollupID, err := rollupManager.RollupAddressToID(&bind.CallOpts{Pending: false}, l1Config.ZkEVMAddr)
-		if err != nil {
-			return nil, err
-		}
-		log.Debug("rollupID: ", rollupID)
-	*/
+	// Get RollupID
+	rollupID, err := rollupManager.RollupAddressToID(&bind.CallOpts{Pending: false}, l1Config.ZkEVMAddr)
+	if err != nil {
+		return nil, err
+	}
+	log.Debug("rollupID: ", rollupID)
+
 	return &Client{
-		EthClient: ethClient,
-		// ZkEVM:                 zkevm,
-		// OldZkEVM:              oldZkevm,
-		// RollupManager:         rollupManager,
-		// Pol:                   pol,
-		// GlobalExitRootManager: globalExitRoot,
-		SCAddresses: scAddresses,
-		// RollupID:    rollupID,
+		EthClient:             ethClient,
+		ZkEVM:                 zkevm,
+		OldZkEVM:              oldZkevm,
+		RollupManager:         rollupManager,
+		Pol:                   pol,
+		GlobalExitRootManager: globalExitRoot,
+		SCAddresses:           scAddresses,
+		RollupID:              rollupID,
 		GasProviders: externalGasProviders{
 			MultiGasProvider: cfg.MultiGasProvider,
 			Providers:        gProviders,
 		},
-		// l1Cfg: l1Config,
-		cfg:  cfg,
-		auth: map[common.Address]bind.TransactOpts{},
+		l1Cfg: l1Config,
+		cfg:   cfg,
+		auth:  map[common.Address]bind.TransactOpts{},
 	}, nil
 }
 
@@ -822,16 +818,13 @@ func (etherMan *Client) processUpdateGlobalExitRootEvent(ctx context.Context, ma
 
 // WaitTxToBeMined waits for an L1 tx to be mined. It will return error if the tx is reverted or timeout is exceeded
 func (etherMan *Client) WaitTxToBeMined(ctx context.Context, tx *types.Transaction, timeout time.Duration) (bool, error) {
-	// TODO: REVIEW
-	/*
-		err := operations.WaitTxToBeMined(ctx, etherMan.EthClient, tx, timeout)
-		if errors.Is(err, context.DeadlineExceeded) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-	*/
+	// err := operations.WaitTxToBeMined(ctx, etherMan.EthClient, tx, timeout)
+	// if errors.Is(err, context.DeadlineExceeded) {
+	// 	return false, nil
+	// }
+	// if err != nil {
+	// 	return false, err
+	// }
 	return true, nil
 }
 
@@ -923,25 +916,72 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 	return tx, err
 }
 
-/*
-func convertProof(p string) ([24][32]byte, error) {
-	if len(p) != 24*32*2+2 {
-		return [24][32]byte{}, fmt.Errorf("invalid proof length. Length: %d", len(p))
-	}
-	p = strings.TrimPrefix(p, "0x")
-	proof := [24][32]byte{}
-	for i := 0; i < 24; i++ {
-		data := p[i*64 : (i+1)*64]
-		p, err := encoding.DecodeBytes(&data)
-		if err != nil {
-			return [24][32]byte{}, fmt.Errorf("failed to decode proof, err: %w", err)
-		}
-		var aux [32]byte
-		copy(aux[:], p)
-		proof[i] = aux
-	}
-	return proof, nil
-}*/
+// BuildTrustedVerifyBatchesTxData builds a []bytes to be sent to the PoE SC method TrustedVerifyBatches.
+// func (etherMan *Client) BuildTrustedVerifyBatchesTxData(lastVerifiedBatch, newVerifiedBatch uint64, inputs *ethmanTypes.FinalProofInputs, beneficiary common.Address) (to *common.Address, data []byte, err error) {
+// opts, err := etherMan.generateRandomAuth()
+// if err != nil {
+// 	return nil, nil, fmt.Errorf("failed to build trusted verify batches, err: %w", err)
+// }
+// opts.NoSend = true
+// // force nonce, gas limit and gas price to avoid querying it from the chain
+// opts.Nonce = big.NewInt(1)
+// opts.GasLimit = uint64(1)
+// opts.GasPrice = big.NewInt(1)
+
+// var newLocalExitRoot [32]byte
+// copy(newLocalExitRoot[:], inputs.NewLocalExitRoot)
+
+// var newStateRoot [32]byte
+// copy(newStateRoot[:], inputs.NewStateRoot)
+
+// proof, err := convertProof(inputs.FinalProof.Proof)
+// if err != nil {
+// 	log.Errorf("error converting proof. Error: %v, Proof: %s", err, inputs.FinalProof.Proof)
+// 	return nil, nil, err
+// }
+
+// const pendStateNum = 0 // TODO hardcoded for now until we implement the pending state feature
+
+// tx, err := etherMan.RollupManager.VerifyBatchesTrustedAggregator(
+// 	&opts,
+// 	etherMan.RollupID,
+// 	pendStateNum,
+// 	lastVerifiedBatch,
+// 	newVerifiedBatch,
+// 	newLocalExitRoot,
+// 	newStateRoot,
+// 	beneficiary,
+// 	proof,
+// )
+// if err != nil {
+// 	if parsedErr, ok := tryParseError(err); ok {
+// 		err = parsedErr
+// 	}
+// 	return nil, nil, err
+// }
+
+// return tx.To(), tx.Data(), nil
+// return nil, nil, nil
+// }
+
+// func convertProof(p string) ([24][32]byte, error) {
+// 	if len(p) != 24*32*2+2 {
+// 		return [24][32]byte{}, fmt.Errorf("invalid proof length. Length: %d", len(p))
+// 	}
+// 	p = strings.TrimPrefix(p, "0x")
+// 	proof := [24][32]byte{}
+// 	for i := 0; i < 24; i++ {
+// 		data := p[i*64 : (i+1)*64]
+// 		p, err := encoding.DecodeBytes(&data)
+// 		if err != nil {
+// 			return [24][32]byte{}, fmt.Errorf("failed to decode proof, err: %w", err)
+// 		}
+// 		var aux [32]byte
+// 		copy(aux[:], p)
+// 		proof[i] = aux
+// 	}
+// 	return proof, nil
+// }
 
 // GetSendSequenceFee get super/trusted sequencer fee
 func (etherMan *Client) GetSendSequenceFee(numBatches uint64) (*big.Int, error) {
@@ -1601,26 +1641,22 @@ func (etherMan *Client) SignTx(ctx context.Context, sender common.Address, tx *t
 
 // GetRevertMessage tries to get a revert message of a transaction
 func (etherMan *Client) GetRevertMessage(ctx context.Context, tx *types.Transaction) (string, error) {
-	if tx == nil {
-		return "", nil
-	}
+	// if tx == nil {
+	// 	return "", nil
+	// }
 
-	// TODO: REVIEW
-	/*
-		receipt, err := etherMan.GetTxReceipt(ctx, tx.Hash())
-		if err != nil {
-			return "", err
-		}
+	// receipt, err := etherMan.GetTxReceipt(ctx, tx.Hash())
+	// if err != nil {
+	// 	return "", err
+	// }
 
-
-			if receipt.Status == types.ReceiptStatusFailed {
-				revertMessage, err := operations.RevertReason(ctx, etherMan.EthClient, tx, receipt.BlockNumber)
-				if err != nil {
-					return "", err
-				}
-				return revertMessage, nil
-			}
-	*/
+	// if receipt.Status == types.ReceiptStatusFailed {
+	// 	revertMessage, err := operations.RevertReason(ctx, etherMan.EthClient, tx, receipt.BlockNumber)
+	// 	if err != nil {
+	// 		return "", err
+	// 	}
+	// 	return revertMessage, nil
+	// }
 	return "", nil
 }
 
@@ -1685,3 +1721,20 @@ func (etherMan *Client) getAuthByAddress(addr common.Address) (bind.TransactOpts
 	}
 	return auth, nil
 }
+
+// generateRandomAuth generates an authorization instance from a
+// randomly generated private key to be used to estimate gas for PoE
+// operations NOT restricted to the Trusted Sequencer
+// func (etherMan *Client) generateRandomAuth() (bind.TransactOpts, error) {
+// 	privateKey, err := crypto.GenerateKey()
+// 	if err != nil {
+// 		return bind.TransactOpts{}, errors.New("failed to generate a private key to estimate L1 txs")
+// 	}
+// 	chainID := big.NewInt(0).SetUint64(etherMan.l1Cfg.L1ChainID)
+// 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+// 	if err != nil {
+// 		return bind.TransactOpts{}, errors.New("failed to generate a fake authorization to estimate L1 txs")
+// 	}
+
+// 	return *auth, nil
+// }

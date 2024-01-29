@@ -16,7 +16,7 @@ import (
 )
 
 func start(cliCtx *cli.Context) error {
-	c, err := config.Load(cliCtx)
+	c, err := config.Load(cliCtx, true)
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func setupLog(c log.Config) {
 }
 
 func newEtherman(c config.Config) (*etherman.Client, error) {
-	return etherman.NewClient(c.Etherman)
+	return etherman.NewClient(c.Etherman, c.NetworkConfig.L1Config)
 }
 
 func createSequenceSender(cfg config.Config) *sequencesender.SequenceSender {
