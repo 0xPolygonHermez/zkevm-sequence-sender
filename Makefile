@@ -1,17 +1,19 @@
 include version.mk
 
 ARCH := $(shell arch)
+GOOS := linux
 
 ifeq ($(ARCH),x86_64)
 	ARCH = amd64
 else
-	ifeq ($(ARCH),aarch64)
+	ifeq ($(ARCH),arm64)
 		ARCH = arm64
+		GOOS = darwin
 	endif
 endif
 GOBASE := $(shell pwd)
 GOBIN := $(GOBASE)/dist
-GOENVVARS := GOBIN=$(GOBIN) CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH)
+GOENVVARS := GOBIN=$(GOBIN) CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH)
 GOBINARY := zkevm-node
 GOCMD := $(GOBASE)/cmd
 
