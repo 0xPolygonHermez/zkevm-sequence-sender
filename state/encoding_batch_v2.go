@@ -2,7 +2,13 @@
 This file provide functions to work with ETROG batches:
 - EncodeBatchV2 (equivalent to EncodeTransactions)
 - DecodeBatchV2 (equivalent to DecodeTxs)
-- DecodeForcedBatchV2)
+- DecodeForcedBatchV2
+
+Also provide a builder class to create batches (BatchV2Encoder):
+ This method doesnt check anything, so is more flexible but you need to know what you are doing
+ - `builder := NewBatchV2Encoder()` : Create a new `BatchV2Encoder``
+ - You can call to `AddBlockHeader` or `AddTransaction` to add a block header or a transaction as you wish
+ - You can call to `GetResult` to get the batch data
 
 
 // batch data format:
@@ -27,6 +33,19 @@ This file provide functions to work with ETROG batches:
 // 0x00							   | 32 | V
 // 0x00							   | 1  | efficiencyPercentage
 // Repeat Transaction
+//
+// Usage:
+// There are 2 ways of use this module, direct calls or a builder class:
+// 1) Direct calls:
+// - EncodeBatchV2: Encode a batch of transactions
+// - DecodeBatchV2: Decode a batch of transactions
+//
+// 2) Builder class:
+//  This method doesnt check anything, so is more flexible but you need to know what you are doing
+// - builder := NewBatchV2Encoder(): Create a new BatchV2Encoder
+//    - You can call to `AddBlockHeader` or `AddTransaction` to add a block header or a transaction as you wish
+//    - You can call to `GetResult` to get the batch data
+
 */
 
 package state
@@ -68,9 +87,9 @@ type ForcedBatchRawV2 struct {
 // L2TxRaw is the raw representation of a L2 transaction  inside a L2 block.
 type L2TxRaw struct {
 	EfficiencyPercentage uint8             // valid always
-	TxAlreadyEncoded     bool              // If true the tx is already encoded (data field is use)
-	Tx                   types.Transaction // valid if txAlreadyEncoded == false
-	Data                 []byte            // valid if txAlreadyEncoded == true
+	TxAlreadyEncoded     bool              // If true the tx is already encoded (data field is used)
+	Tx                   types.Transaction // valid if TxAlreadyEncoded == false
+	Data                 []byte            // valid if TxAlreadyEncoded == true
 }
 
 const (
@@ -173,7 +192,7 @@ func (tx L2TxRaw) Encode(batchData []byte) ([]byte, error) {
 	if tx.TxAlreadyEncoded {
 		batchData = append(batchData, tx.Data...)
 	} else {
-		rlpTx, err := prepareRPLTxData(tx.Tx)
+		rlpTx, err := prepareRLPTxData(tx.Tx)
 		if err != nil {
 			return nil, fmt.Errorf("can't encode tx to RLP: %w", err)
 		}

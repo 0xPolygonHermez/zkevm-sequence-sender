@@ -80,6 +80,7 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		log.Fatalf("[SeqSender] error restoring sent sequences from file", err)
 		return nil, err
 	}
+	s.printSequences(0, true, true)
 
 	// Create ethtxmanager client
 	s.ethTxManager, err = ethtxmanager.New(cfg.EthTxManager)
@@ -249,18 +250,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	// 	data = append(data, s.sequenceData[b].batch.BatchL2Data...)
 	// }
 	// to := s.cfg.SenderAddress //common.HexToAddress("0x0001")
-
-	// Check
-	log.Debugf("[SeqSender] BEFORE")
-	s.printSequences(firstSequence.BatchNumber, true)
-	encoded := s.sequenceData[firstSequence.BatchNumber].batch.BatchL2Data
-	log.Debugf("[SeqSender] DECODED")
-	batchDecoded, err := state.DecodeBatchV2(encoded)
-	if err != nil {
-		log.Errorf("[SeqSender] error decoding batch V2")
-	}
-	log.Debugf("[SeqSender] DECODED")
-	s.printBatch(batchDecoded, true)
 
 	// Add sequence
 	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
@@ -584,7 +573,7 @@ func (s *SequenceSender) closeSequenceBatch() error {
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
 		data.batchClosed = true
-		data.batch.PrevBlockHash = s.prevBlockHash
+		// data.batch.PrevBlockHash = s.prevBlockHash
 
 		var err error
 		data.batch.BatchL2Data, err = state.EncodeBatchV2(data.batchRaw)
@@ -677,10 +666,16 @@ func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	_, blockRaw := s.getWipL2Block()
 
 	// New Tx raw
+	tx, err := state.DecodeTx(common.Bytes2Hex(l2Tx.Encoded))
+	if err != nil {
+		log.Fatalf("[SeqSender] error decoding tx!")
+		return
+	}
+
 	l2TxRaw := state.L2TxRaw{
 		EfficiencyPercentage: l2Tx.EffectiveGasPricePercentage,
-		TxAlreadyEncoded:     true,
-		Data:                 l2Tx.Encoded,
+		TxAlreadyEncoded:     false,
+		Tx:                   *tx,
 	}
 
 	// Add Tx
@@ -721,7 +716,7 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 }
 
 // printSequences prints the current batches sequence (or just a selected batch) in the memory structure
-func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool) {
+func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool, showTx bool) {
 	for i := 0; i < len(s.sequenceList); i++ {
 		// Batch info
 		batchNumber := s.sequenceList[i]
@@ -737,12 +732,19 @@ func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool) {
 			}
 
 			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x...)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:8])
-			s.printBatch(raw, showBlock)
+			printBatch(raw, showBlock, showTx)
 		}
 	}
 }
 
-func (s *SequenceSender) printBatch(raw *state.BatchRawV2, showBlock bool) {
+// printEthTxs prints the current L1 transactions in the memory structure
+func (s *SequenceSender) printEthTxs() {
+	for hash, data := range s.ethTransactions {
+		log.Debugf("[SeqSender] // tx hash %x... (status: %s, from: %d, to: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
+	}
+}
+
+func printBatch(raw *state.BatchRawV2, showBlock bool, showTx bool) {
 	// Total amount of L2 tx in the batch
 	totalL2Txs := 0
 	for k := 0; k < len(raw.Blocks); k++ {
@@ -764,16 +766,16 @@ func (s *SequenceSender) printBatch(raw *state.BatchRawV2, showBlock bool) {
 		}
 		if firstBlock != nil {
 			log.Debugf("[SeqSender] //    block first (indL1info: %d, delta-timestamp: %d, #L2txs: %d)", firstBlock.IndexL1InfoTree, firstBlock.DeltaTimestamp, len(firstBlock.Transactions))
+			// Tx info
+			if showTx {
+				for iTx, tx := range firstBlock.Transactions {
+					v, r, s := tx.Tx.RawSignatureValues()
+					log.Debugf("[SeqSender] //       tx(%d) effPct: %d, encoded: %t, Tx: %+v, v: %v, r: %v, s: %v", iTx, tx.EfficiencyPercentage, tx.TxAlreadyEncoded, tx.Tx, v, r, s)
+				}
+			}
 		}
 		if lastBlock != nil {
 			log.Debugf("[SeqSender] //    block last (indL1info: %d, delta-timestamp: %d, #L2txs: %d)", lastBlock.DeltaTimestamp, lastBlock.DeltaTimestamp, len(lastBlock.Transactions))
 		}
-	}
-}
-
-// printEthTxs prints the current L1 transactions in the memory structure
-func (s *SequenceSender) printEthTxs() {
-	for hash, data := range s.ethTransactions {
-		log.Debugf("[SeqSender] // tx hash %x... (status: %s, from: %d, to: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
 	}
 }

@@ -1,10 +1,11 @@
 package sequencesender
 
 import (
-	"fmt"
 	"testing"
 
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,6 +15,21 @@ const (
 )
 
 func TestStreamTx(t *testing.T) {
+	tx1, err := state.DecodeTx(txStreamEncoded1)
+	require.NoError(t, err)
+	tx2, err := state.DecodeTx(txStreamEncoded2)
+	require.NoError(t, err)
+
+	txTest := state.L2TxRaw{
+		EfficiencyPercentage: 129,
+		TxAlreadyEncoded:     false,
+		Tx:                   *tx1,
+	}
+	txTestEncoded := make([]byte, 0)
+	txTestEncoded, err = txTest.Encode(txTestEncoded)
+	require.NoError(t, err)
+	log.Debugf("%s", common.Bytes2Hex(txTestEncoded))
+
 	batch := state.BatchRawV2{
 		Blocks: []state.L2BlockRaw{
 			{
@@ -23,25 +39,27 @@ func TestStreamTx(t *testing.T) {
 				},
 				Transactions: []state.L2TxRaw{
 					{
-						EfficiencyPercentage: 128,
-						TxAlreadyEncoded:     true,
-						Data:                 []byte(txStreamEncoded1),
+						EfficiencyPercentage: 129,
+						TxAlreadyEncoded:     false,
+						Tx:                   *tx1,
 					},
 					{
-						EfficiencyPercentage: 128,
-						TxAlreadyEncoded:     true,
-						Data:                 []byte(txStreamEncoded2),
+						EfficiencyPercentage: 97,
+						TxAlreadyEncoded:     false,
+						Tx:                   *tx2,
 					},
 				},
 			},
 		},
 	}
 
+	printBatch(&batch, true, true)
+
 	encodedBatch, err := state.EncodeBatchV2(&batch)
 	require.NoError(t, err)
-	fmt.Printf("encoded: %x", encodedBatch)
 
 	decodedBatch, err := state.DecodeBatchV2(encodedBatch)
 	require.NoError(t, err)
-	fmt.Printf("decoded: %x", decodedBatch)
+
+	printBatch(decodedBatch, true, true)
 }
