@@ -178,6 +178,7 @@ func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
 			log.Errorf("[SeqSender] Error getting result for tx %v: %v", hash, err)
 		} else {
 			// Update tx status
+			log.Debugf("[SeqSender] transaction %v status %s", hash, string(txResult.Status))
 			data.Status = string(txResult.Status)
 		}
 
@@ -203,6 +204,8 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 			if txSequence.Status != result.Status.String() {
 				log.Debugf("[SeqSender] update transaction %v state to %s", result.ID, result.Status.String())
 				txSequence.Status = result.Status.String()
+			} else {
+				log.Debugf("[SeqSender] transaction %v keep state %s", result.ID, result.Status.String())
 			}
 		} else {
 			log.Debugf("[SeqSender] transaction %v does not exist in memory structure. Adding it", result.ID)
@@ -270,6 +273,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	log.Debugf("[SeqSender] BEFORE")
 	s.printSequences(firstSequence.BatchNumber, true)
 	encoded := s.sequenceData[firstSequence.BatchNumber].batch.BatchL2Data
+	log.Debugf("[SeqSender] DECODED")
 	batchDecoded, err := state.DecodeBatchV2(encoded)
 	if err != nil {
 		log.Errorf("[SeqSender] error decoding batch V2")
@@ -285,6 +289,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	// Add sequence tx
+	log.Debugf("[SeqSender] ethTxman Add, to: %v", to)
 	txHash, err := s.ethTxManager.Add(ctx, to, nil, big.NewInt(0), data)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
@@ -354,6 +359,8 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 				return sequences, err
 			}
 			return sequences, err
+		} else {
+			log.Debugf("[SeqSender] Estimate Gas adding batch %d tx size %d: error %v", batchNumber, tx.Size(), err)
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
@@ -683,6 +690,7 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	s.mutexSequence.Lock()
 	log.Infof("[SeqSender] ........new tx, length %d", l2Tx.EncodedLength)
+	log.Debugf("[SeqSender] ........encoded: [%x]", l2Tx.Encoded)
 
 	// Current L2 block
 	_, blockRaw := s.getWipL2Block()
