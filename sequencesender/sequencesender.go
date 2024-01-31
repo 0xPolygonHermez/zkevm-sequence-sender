@@ -80,7 +80,7 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		log.Fatalf("[SeqSender] error restoring sent sequences from file", err)
 		return nil, err
 	}
-	s.printSequences(0, true, true)
+	s.printBatchSequences(0, true, true)
 
 	// Create ethtxmanager client
 	s.ethTxManager, err = ethtxmanager.New(cfg.EthTxManager)
@@ -199,10 +199,10 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	}
 
 	// Save updated sequences
-	// err = s.saveSentSequencesTransactions()
-	// if err != nil {
-	// 	log.Fatalf("[SeqSender] error saving tx sequence sent, error: %v", err)
-	// }
+	err = s.saveSentSequencesTransactions()
+	if err != nil {
+		log.Fatalf("[SeqSender] error saving tx sequence sent, error: %v", err)
+	}
 
 	return nil
 }
@@ -244,6 +244,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	firstSequence := sequences[0]
 	lastSequence := sequences[sequenceCount-1]
 	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
+	printSequences(sequences)
 
 	// data := make([]byte, 0)
 	// for b := firstSequence.BatchNumber; b <= lastSequence.BatchNumber; b++ {
@@ -255,6 +256,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
+		waitTick(ctx, ticker)
 		return
 	}
 
@@ -263,6 +265,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	txHash, err := s.ethTxManager.Add(ctx, to, nil, big.NewInt(0), data)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
+		waitTick(ctx, ticker)
 		return
 	}
 
@@ -282,6 +285,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	s.printEthTxs()
+	os.Exit(1)
 }
 
 // getSequencesToSend generates an array of sequences to be send to L1.
@@ -329,8 +333,8 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 				return sequences, err
 			}
 			return sequences, err
-		} else {
-			log.Debugf("[SeqSender] Estimate Gas adding batch %d tx size %d: error %v", batchNumber, tx.Size(), err)
+			// } else {
+			// 	log.Debugf("[SeqSender] Estimate Gas adding batch %d tx size %d", batchNumber, tx.Size())
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
@@ -623,8 +627,11 @@ func (s *SequenceSender) addInfoSequenceBatch(l2BlockEnd state.DSL2BlockEnd) {
 	s.mutexSequence.Lock()
 
 	// Current batch
-	wipBatch := s.sequenceData[s.wipBatch].batch
-	wipBatch.StateRoot = l2BlockEnd.StateRoot
+	data := s.sequenceData[s.wipBatch]
+	if data != nil {
+		wipBatch := data.batch
+		wipBatch.StateRoot = l2BlockEnd.StateRoot
+	}
 
 	s.mutexSequence.Unlock()
 }
@@ -632,35 +639,40 @@ func (s *SequenceSender) addInfoSequenceBatch(l2BlockEnd state.DSL2BlockEnd) {
 // addNewBatchL2Block adds a new L2 block to the work in progress batch
 func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d)", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber)
+	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d), GER %x..", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber, l2BlockStart.GlobalExitRoot[:32])
 
 	// Current batch
-	wipBatchRaw := s.sequenceData[s.wipBatch].batchRaw
+	data := s.sequenceData[s.wipBatch]
+	if data != nil {
+		wipBatchRaw := data.batchRaw
+		// data.batch.GlobalExitRoot = l2BlockStart.GlobalExitRoot
 
-	// New L2 block raw
-	newBlockRaw := state.L2BlockRaw{}
+		// New L2 block raw
+		newBlockRaw := state.L2BlockRaw{}
 
-	// Add L2 block
-	wipBatchRaw.Blocks = append(wipBatchRaw.Blocks, newBlockRaw)
+		// Add L2 block
+		wipBatchRaw.Blocks = append(wipBatchRaw.Blocks, newBlockRaw)
 
-	// Get current L2 block
-	_, blockRaw := s.getWipL2Block()
-	if blockRaw == nil {
-		log.Debugf("[SeqSender] wip block %d not found!")
-		return
+		// Get current L2 block
+		_, blockRaw := s.getWipL2Block()
+		if blockRaw == nil {
+			log.Debugf("[SeqSender] wip block %d not found!")
+			return
+		}
+
+		// Fill in data
+		blockRaw.DeltaTimestamp = l2BlockStart.DeltaTimestamp
+		blockRaw.IndexL1InfoTree = l2BlockStart.L1InfoTreeIndex
 	}
 
-	// Fill in data
-	blockRaw.DeltaTimestamp = l2BlockStart.DeltaTimestamp
-	blockRaw.IndexL1InfoTree = l2BlockStart.L1InfoTreeIndex
 	s.mutexSequence.Unlock()
 }
 
 // addNewBlockTx adds a new Tx to the current L2 block
 func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] ........new tx, length %d", l2Tx.EncodedLength)
-	log.Debugf("[SeqSender] ........encoded: [%x]", l2Tx.Encoded)
+	log.Infof("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:32])
+	// log.Debugf("[SeqSender] ........encoded: [%x]", l2Tx.Encoded)
 
 	// Current L2 block
 	_, blockRaw := s.getWipL2Block()
@@ -715,8 +727,8 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 	return nil
 }
 
-// printSequences prints the current batches sequence (or just a selected batch) in the memory structure
-func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool, showTx bool) {
+// printBatchSequences prints the current batches sequence (or just a selected batch) in the memory structure
+func (s *SequenceSender) printBatchSequences(selectBatch uint64, showBlock bool, showTx bool) {
 	for i := 0; i < len(s.sequenceList); i++ {
 		// Batch info
 		batchNumber := s.sequenceList[i]
@@ -731,7 +743,7 @@ func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool, show
 				continue
 			}
 
-			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x...)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:8])
+			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x..)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:32])
 			printBatch(raw, showBlock, showTx)
 		}
 	}
@@ -740,10 +752,18 @@ func (s *SequenceSender) printSequences(selectBatch uint64, showBlock bool, show
 // printEthTxs prints the current L1 transactions in the memory structure
 func (s *SequenceSender) printEthTxs() {
 	for hash, data := range s.ethTransactions {
-		log.Debugf("[SeqSender] // tx hash %x... (status: %s, from: %d, to: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
+		log.Debugf("[SeqSender] // tx hash %x.. (status: %s, from: %d, to: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
 	}
 }
 
+// printSequences prints data from slice of type sequences
+func printSequences(sequences []types.Sequence) {
+	for i, seq := range sequences {
+		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:32])
+	}
+}
+
+// printBatch prints data from batch raw V2
 func printBatch(raw *state.BatchRawV2, showBlock bool, showTx bool) {
 	// Total amount of L2 tx in the batch
 	totalL2Txs := 0
@@ -770,7 +790,7 @@ func printBatch(raw *state.BatchRawV2, showBlock bool, showTx bool) {
 			if showTx {
 				for iTx, tx := range firstBlock.Transactions {
 					v, r, s := tx.Tx.RawSignatureValues()
-					log.Debugf("[SeqSender] //       tx(%d) effPct: %d, encoded: %t, Tx: %+v, v: %v, r: %v, s: %v", iTx, tx.EfficiencyPercentage, tx.TxAlreadyEncoded, tx.Tx, v, r, s)
+					log.Debugf("[SeqSender] //       tx(%d) effPct: %d, encoded: %t, v: %v, r: %v, s: %v", iTx, tx.EfficiencyPercentage, tx.TxAlreadyEncoded, v, r, s)
 				}
 			}
 		}
