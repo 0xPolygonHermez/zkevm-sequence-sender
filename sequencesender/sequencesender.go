@@ -38,8 +38,9 @@ type SequenceSender struct {
 	wipBatch            uint64                    // Work in progress batch
 	sequenceList        []uint64                  // Sequence of batch number to be send to L1
 	sequenceData        map[uint64]*sequenceData  // All the batch data indexed by batch number
-	mutexSequence       sync.Mutex                // Mutex to update sequence data
+	mutexSequence       sync.Mutex                // Mutex to access sequence data
 	ethTransactions     map[common.Hash]ethTxData // All the eth tx sent to L1 indexed by hash
+	mutexEthTx          sync.Mutex                // Mutex to access transactions data
 	sequencesTxFile     *os.File
 	validStream         bool   // Not valid while receiving data before the desired batch
 	fromStreamBatch     uint64 // Initial batch to connect to the streaming
@@ -150,6 +151,7 @@ func (s *SequenceSender) Start(ctx context.Context) {
 }
 
 func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
+	s.mutexEthTx.Lock()
 	for hash, data := range s.ethTransactions {
 		txResult, err := s.ethTxManager.Result(ctx, hash)
 		if err == ethtxmanager.ErrNotFound {
@@ -166,6 +168,7 @@ func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
 
 		// TODO: Manage according to the state
 	}
+	s.mutexEthTx.Unlock()
 
 	s.printEthTxs()
 	return nil
@@ -180,6 +183,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	}
 
 	// Check and update tx status
+	s.mutexEthTx.Lock()
 	for _, result := range results {
 		txSequence, exists := s.ethTransactions[result.ID]
 		if exists {
@@ -197,6 +201,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 			}
 		}
 	}
+	s.mutexEthTx.Unlock()
 
 	// Save updated sequences
 	err = s.saveSentSequencesTransactions()
@@ -275,7 +280,9 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 		FromBatch: firstSequence.BatchNumber,
 		ToBatch:   lastSequence.BatchNumber,
 	}
+	s.mutexEthTx.Lock()
 	s.ethTransactions[txHash] = txData
+	s.mutexEthTx.Unlock()
 	s.latestSentToL1Batch = lastSequence.BatchNumber
 
 	// Save sent sequences
@@ -285,7 +292,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	s.printEthTxs()
-	os.Exit(1)
 }
 
 // getSequencesToSend generates an array of sequences to be send to L1.
@@ -441,7 +447,9 @@ func (s *SequenceSender) loadSentSequencesTransactions() error {
 	}
 
 	// Restore memory structure
+	s.mutexEthTx.Lock()
 	err = json.Unmarshal(data, &s.ethTransactions)
+	s.mutexEthTx.Unlock()
 	if err != nil {
 		log.Errorf("[SeqSender] error decoding data from %s: %v", s.cfg.SequencesTxFileName, err)
 		return err
@@ -466,7 +474,9 @@ func (s *SequenceSender) saveSentSequencesTransactions() error {
 	// Write data JSON encoded
 	encoder := json.NewEncoder(s.sequencesTxFile)
 	encoder.SetIndent("", "  ")
+	s.mutexEthTx.Lock()
 	err = encoder.Encode(s.ethTransactions)
+	s.mutexEthTx.Unlock()
 	if err != nil {
 		log.Errorf("[SeqSender] error writing file %s: %v", fileName, err)
 		return err
@@ -639,7 +649,7 @@ func (s *SequenceSender) addInfoSequenceBatch(l2BlockEnd state.DSL2BlockEnd) {
 // addNewBatchL2Block adds a new L2 block to the work in progress batch
 func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d), GER %x..", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber, l2BlockStart.GlobalExitRoot[:32])
+	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d), GER %x..", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber, l2BlockStart.GlobalExitRoot[:8])
 
 	// Current batch
 	data := s.sequenceData[s.wipBatch]
@@ -671,7 +681,7 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 // addNewBlockTx adds a new Tx to the current L2 block
 func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:32])
+	log.Infof("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:8])
 	// log.Debugf("[SeqSender] ........encoded: [%x]", l2Tx.Encoded)
 
 	// Current L2 block
@@ -743,7 +753,7 @@ func (s *SequenceSender) printBatchSequences(selectBatch uint64, showBlock bool,
 				continue
 			}
 
-			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x..)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:32])
+			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x..)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:8])
 			printBatch(raw, showBlock, showTx)
 		}
 	}
@@ -752,14 +762,14 @@ func (s *SequenceSender) printBatchSequences(selectBatch uint64, showBlock bool,
 // printEthTxs prints the current L1 transactions in the memory structure
 func (s *SequenceSender) printEthTxs() {
 	for hash, data := range s.ethTransactions {
-		log.Debugf("[SeqSender] // tx hash %x.. (status: %s, from: %d, to: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
+		log.Debugf("[SeqSender] // tx hash %x.. (status: %s, fromBatch: %d, toBatch: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
 	}
 }
 
 // printSequences prints data from slice of type sequences
 func printSequences(sequences []types.Sequence) {
 	for i, seq := range sequences {
-		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:32])
+		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
 	}
 }
 
