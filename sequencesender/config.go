@@ -44,6 +44,9 @@ type Config struct {
 	// SequencesTxFileName is the file name to store sequences sent to L1
 	SequencesTxFileName string
 
+	// WaitPeriodPurgeTxFile is the time to wait before purging from file the finished sent L1 tx
+	WaitPeriodPurgeTxFile types.Duration `mapstructure:"WaitPeriodPurgeTxFile"`
+
 	// StreamClient is the config for the stream client
 	StreamClient StreamClientCfg `mapstructure:"StreamClient"`
 

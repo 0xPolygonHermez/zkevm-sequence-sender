@@ -21,10 +21,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const (
-	txStateNotExists = "notexists"
-)
-
 var (
 	// ErrOversizedData is returned if the input data of a transaction is greater
 	// than some meaningful limit a user might use. This is not a consensus error
@@ -38,6 +34,7 @@ type SequenceSender struct {
 	ethTxManager        *ethtxmanager.Client
 	etherman            *etherman.Client
 	latestVirtualBatch  uint64                     // Latest virtualized batch obtained from L1
+	latestVirtualTime   time.Time                  // Latest virtual batch timestamp
 	latestSentToL1Batch uint64                     // Latest batch sent to L1
 	wipBatch            uint64                     // Work in progress batch
 	sequenceList        []uint64                   // Sequence of batch number to be send to L1
@@ -45,12 +42,12 @@ type SequenceSender struct {
 	mutexSequence       sync.Mutex                 // Mutex to access sequenceData and sequenceList
 	ethTransactions     map[common.Hash]*ethTxData // All the eth tx sent to L1 indexed by hash
 	mutexEthTx          sync.Mutex                 // Mutex to access ethTransactions
-	sequencesTxFile     *os.File
-	validStream         bool   // Not valid while receiving data before the desired batch
-	fromStreamBatch     uint64 // Initial batch to connect to the streaming
-	latestStreamBatch   uint64 // Latest batch received by the streaming
+	sequencesTxFile     *os.File                   // Persistence of sent transactions
+	validStream         bool                       // Not valid while receiving data before the desired batch
+	fromStreamBatch     uint64                     // Initial batch to connect to the streaming
+	latestStreamBatch   uint64                     // Latest batch received by the streaming
+	sequencingStopped   bool                       // If there is a critical error
 	streamClient        *datastreamer.StreamClient
-	prevBlockHash       common.Hash
 }
 
 type sequenceData struct {
@@ -60,9 +57,12 @@ type sequenceData struct {
 }
 
 type ethTxData struct {
-	Status    string `json:"status"`
-	FromBatch uint64 `json:"fromBatch"`
-	ToBatch   uint64 `json:"toBatch"`
+	SentL1Timestamp time.Time `json:"sentL1Timestamp"`
+	StatusTimestamp time.Time `json:"statusTimestamp"`
+	Status          string    `json:"status"`
+	FromBatch       uint64    `json:"fromBatch"`
+	ToBatch         uint64    `json:"toBatch"`
+	OnMonitor       bool      `json:"onMonitor"`
 }
 
 // New inits sequence sender
@@ -75,6 +75,7 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		sequenceData:      make(map[uint64]*sequenceData),
 		validStream:       false,
 		latestStreamBatch: 0,
+		sequencingStopped: false,
 	}
 
 	// Restore pending sent sequences
@@ -96,7 +97,7 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 	if err != nil {
 		log.Fatalf("[SeqSender] failed to create stream client, error: %v", err)
 	} else {
-		log.Debugf("[SeqSender] new stream client")
+		log.Infof("[SeqSender] new stream client")
 	}
 	// Set func to handle the streaming
 	s.streamClient.SetProcessEntryFunc(s.handleReceivedDataStream)
@@ -109,20 +110,16 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	// Start ethtxmanager client
 	go s.ethTxManager.Start()
 
-	// Sync all monitored sent L1 tx
-	err := s.syncAllEthTxResults(ctx)
+	// Get latest virtual state batch from L1
+	err := s.updateLatestVirtualBatch()
 	if err != nil {
-		log.Fatalf("[SeqSender] failed to sync monitored tx results, error: %v", err)
+		log.Fatalf("[SeqSender] error getting latest sequenced batch, error: %v", err)
 	}
 
-	// Purge tx
-	s.purgeEthTx()
-	s.printEthTxs()
-
-	// Save updated sequences transactions
-	err = s.saveSentSequencesTransactions()
+	// Sync all monitored sent L1 tx
+	err = s.syncAllEthTxResults(ctx)
 	if err != nil {
-		log.Fatalf("[SeqSender] error saving tx sequence sent, error: %v", err)
+		log.Fatalf("[SeqSender] failed to sync monitored tx results, error: %v", err)
 	}
 
 	// Start datastream client
@@ -131,25 +128,19 @@ func (s *SequenceSender) Start(ctx context.Context) {
 		log.Fatalf("[SeqSender] failed to start stream client, error: %v", err)
 	}
 
-	// Get latest virtual state batch from L1
-	err = s.updateLatestVirtualBatch()
-	if err != nil {
-		log.Fatalf("[SeqSender] error getting latest sequenced batch, error: %v", err)
-	}
-
 	// Set starting point of the streaming
 	s.fromStreamBatch = s.latestVirtualBatch
 	bookmark := []byte{state.BookMarkTypeBatch}
 	bookmark = binary.BigEndian.AppendUint64(bookmark, s.fromStreamBatch)
 	s.streamClient.FromBookmark = bookmark
-	log.Debugf("[SeqSender] stream client from bookmark %v", bookmark)
+	log.Infof("[SeqSender] stream client from bookmark %v", bookmark)
 
 	// Current batch to sequence
 	s.wipBatch = s.latestVirtualBatch + 1
 	s.latestSentToL1Batch = s.latestVirtualBatch
 
 	// Start receiving the streaming
-	err = s.streamClient.ExecCommand(datastreamer.CmdStart)
+	err = s.streamClient.ExecCommand(datastreamer.CmdStartBookmark)
 	if err != nil {
 		log.Fatalf("[SeqSender] failed to connect to the streaming")
 	}
@@ -161,28 +152,39 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	}
 }
 
-func (s *SequenceSender) purgeSequences(batchNumber uint64) {
-	s.mutexSequence.Lock()
-	truncateUntil := 0
-	for i := 0; i < len(s.sequenceList); i++ {
-		batchNumber := s.sequenceList[i]
-		if batchNumber <= s.latestVirtualBatch {
-			truncateUntil = i + 1
-		}
-	}
+// func (s *SequenceSender) purgeSequences(batchNumber uint64) {
+// 	s.mutexSequence.Lock()
+// 	truncateUntil := 0
+// 	for i := 0; i < len(s.sequenceList); i++ {
+// 		batchNumber := s.sequenceList[i]
+// 		if batchNumber <= s.latestVirtualBatch {
+// 			truncateUntil = i + 1
+// 		}
+// 	}
 
-	if truncateUntil > 0 {
-		s.sequenceList = s.sequenceList[truncateUntil:]
-	}
-	s.mutexSequence.Unlock()
-}
+// 	if truncateUntil > 0 {
+// 		s.sequenceList = s.sequenceList[truncateUntil:]
+// 	}
+// 	s.mutexSequence.Unlock()
+// }
 
 // purgeEthTx purges transactions from memory structure
 func (s *SequenceSender) purgeEthTx() {
+	// If sequencing is stopped, do not purge
+	if s.sequencingStopped {
+		return
+	}
+
+	// Purge old transactions that are finalized
 	s.mutexEthTx.Lock()
+	timePurge := time.Now().Add(-s.cfg.WaitPeriodPurgeTxFile.Duration)
 	toPurge := make([]common.Hash, 0)
 	for hash, data := range s.ethTransactions {
-		if data.Status == txStateNotExists || data.Status == ethtxmanager.MonitoredTxStatusConfirmed.String() {
+		if !data.StatusTimestamp.Before(timePurge) {
+			continue
+		}
+
+		if !data.OnMonitor || data.Status == ethtxmanager.MonitoredTxStatusConfirmed.String() {
 			toPurge = append(toPurge, hash)
 		}
 	}
@@ -193,8 +195,8 @@ func (s *SequenceSender) purgeEthTx() {
 	s.mutexEthTx.Unlock()
 }
 
-// updateEthTxResults gets and updates results from L1 for transactions in the memory structure
-func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
+// syncEthTxResults syncs results from L1 for transactions in the memory structure
+func (s *SequenceSender) syncEthTxResults(ctx context.Context) error {
 	s.mutexEthTx.Lock()
 	for hash, data := range s.ethTransactions {
 		if data.Status == ethtxmanager.MonitoredTxStatusConfirmed.String() {
@@ -203,20 +205,23 @@ func (s *SequenceSender) updateEthTxResults(ctx context.Context) error {
 
 		txResult, err := s.ethTxManager.Result(ctx, hash)
 		if err == ethtxmanager.ErrNotFound {
-			log.Debugf("[SeqSender] transaction %v does not exist in ethtxmanager. Removing it", hash)
-			// delete(s.ethTransactions, hash)
-			data.Status = txStateNotExists
+			log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager. Marking it", hash)
+			data.OnMonitor = false
+			// TODO: sent the same again
 		} else if err != nil {
 			log.Errorf("[SeqSender] Error getting result for tx %v: %v", hash, err)
 		} else {
-			// Update tx status
-			log.Debugf("[SeqSender] transaction %v status %s", hash, string(txResult.Status))
-			data.Status = string(txResult.Status)
+			s.updateEthTxResult(data, txResult)
 		}
-
-		// TODO: Manage according to the state
 	}
 	s.mutexEthTx.Unlock()
+
+	// Save updated sequences transactions
+	err := s.saveSentSequencesTransactions()
+	if err != nil {
+		log.Errorf("[SeqSender] error saving tx sequence, error: %v", err)
+	}
+
 	return nil
 }
 
@@ -234,22 +239,43 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	for _, result := range results {
 		txSequence, exists := s.ethTransactions[result.ID]
 		if exists {
-			if txSequence.Status != result.Status.String() {
-				log.Debugf("[SeqSender] update transaction %v state to %s", result.ID, result.Status.String())
-				txSequence.Status = result.Status.String()
-			} else {
-				log.Debugf("[SeqSender] transaction %v keep state %s", result.ID, result.Status.String())
-			}
+			s.updateEthTxResult(txSequence, result)
 		} else {
-			log.Debugf("[SeqSender] transaction %v does not exist in memory structure. Adding it", result.ID)
-			// TODO: from/to batch info?
+			log.Infof("[SeqSender] transaction %v does not exist in memory structure. Adding it", result.ID)
+			// TODO: from/to batch and sent timestamp info?
 			s.ethTransactions[result.ID] = &ethTxData{
-				Status: result.Status.String(),
+				SentL1Timestamp: time.Time{},
+				StatusTimestamp: time.Now(),
+				Status:          result.Status.String(),
+				OnMonitor:       true,
 			}
 		}
 	}
 	s.mutexEthTx.Unlock()
+
+	// Save updated sequences transactions
+	err = s.saveSentSequencesTransactions()
+	if err != nil {
+		log.Errorf("[SeqSender] error saving tx sequence, error: %v", err)
+	}
+
 	return nil
+}
+
+// updateEthTxResult handles updating transaction state
+func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmanager.MonitoredTxResult) {
+	if txData.Status != txResult.Status.String() {
+		log.Infof("[SeqSender] update transaction %v to state %s", txResult.ID, txResult.Status.String())
+		txData.StatusTimestamp = time.Now()
+		txData.Status = txResult.Status.String()
+
+		// TODO: Manage according to the state
+		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
+			s.logFatalf("[SeqSender] transaction %v result failed!")
+		} else if txData.Status == ethtxmanager.MonitoredTxStatusConfirmed.String() && txData.ToBatch >= s.latestVirtualBatch {
+			s.latestVirtualTime = txData.StatusTimestamp
+		}
+	}
 }
 
 // tryToSendSequence checks if there is a sequence and it's worth it to send to L1
@@ -264,13 +290,17 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 
 	// Check and update the state of transactions
 	log.Debugf("[SeqSender] updating tx results")
-	err = s.updateEthTxResults(ctx)
+	err = s.syncEthTxResults(ctx)
 	if err != nil {
 		waitTick(ctx, ticker)
 		return
 	}
 
-	// TODO: Add time margin
+	// Check if sequencing is stopped
+	if s.sequencingStopped {
+		waitTick(ctx, ticker)
+		return
+	}
 
 	// Check if should send sequence to L1
 	log.Debugf("[SeqSender] getting sequences to send")
@@ -279,7 +309,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 		if err != nil {
 			log.Errorf("[SeqSender] error getting sequences: %v", err)
 		} else {
-			log.Debugf("[SeqSender] waiting for sequences to be worth sending to L1")
+			log.Infof("[SeqSender] waiting for sequences to be worth sending to L1")
 		}
 		waitTick(ctx, ticker)
 		return
@@ -292,12 +322,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
 	printSequences(sequences)
 
-	// data := make([]byte, 0)
-	// for b := firstSequence.BatchNumber; b <= lastSequence.BatchNumber; b++ {
-	// 	data = append(data, s.sequenceData[b].batch.BatchL2Data...)
-	// }
-	// to := s.cfg.SenderAddress //common.HexToAddress("0x0001")
-
 	// Add sequence
 	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
 	if err != nil {
@@ -307,7 +331,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	// Add sequence tx
-	log.Debugf("[SeqSender] ethTxman Add, to: %v", to)
 	txHash, err := s.ethTxManager.Add(ctx, to, nil, big.NewInt(0), data)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
@@ -317,23 +340,23 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 
 	// Add new eth tx
 	txData := ethTxData{
-		Status:    string(ethtxmanager.MonitoredTxStatusCreated),
-		FromBatch: firstSequence.BatchNumber,
-		ToBatch:   lastSequence.BatchNumber,
+		SentL1Timestamp: time.Now(),
+		StatusTimestamp: time.Now(),
+		Status:          string(ethtxmanager.MonitoredTxStatusCreated),
+		FromBatch:       firstSequence.BatchNumber,
+		ToBatch:         lastSequence.BatchNumber,
+		OnMonitor:       true,
 	}
 	s.mutexEthTx.Lock()
 	s.ethTransactions[txHash] = &txData
-	s.mutexEthTx.Unlock()
 	s.latestSentToL1Batch = lastSequence.BatchNumber
+	s.mutexEthTx.Unlock()
 
 	// Save sent sequences
 	err = s.saveSentSequencesTransactions()
 	if err != nil {
-		log.Fatalf("[SeqSender] error saving tx sequence sent, error: %v", err)
+		log.Errorf("[SeqSender] error saving tx sequence sent, error: %v", err)
 	}
-
-	s.purgeEthTx()
-	s.printEthTxs()
 }
 
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
@@ -349,7 +372,7 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 		// Check if the next batch belongs to a new forkid, in this case we need to stop sequencing as we need to
 		// wait the upgrade of forkid is completed and s.cfg.NumBatchForkIdUpgrade is disabled (=0) again
 		if (s.cfg.ForkUpgradeBatchNumber != 0) && (batchNumber == (s.cfg.ForkUpgradeBatchNumber + 1)) {
-			return nil, fmt.Errorf("[SeqSender] aborting sequencing process as we reached the batch %d where a new forkid is applied (upgrade)", s.cfg.ForkUpgradeBatchNumber+1)
+			return nil, fmt.Errorf("aborting sequencing process as we reached the batch %d where a new forkid is applied (upgrade)", s.cfg.ForkUpgradeBatchNumber+1)
 		}
 
 		// Check if batch is closed
@@ -379,8 +402,6 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 				return sequences, err
 			}
 			return sequences, err
-			// } else {
-			// 	log.Debugf("[SeqSender] Estimate Gas adding batch %d tx size %d", batchNumber, tx.Size())
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
@@ -392,23 +413,17 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 
 	// Reached latest batch. Decide if it's worth to send the sequence, or wait for new batches
 	if len(sequences) == 0 {
-		log.Info("[SeqSender] no batches to be sequenced")
+		log.Infof("[SeqSender] no batches to be sequenced")
 		return nil, nil
 	}
 
-	// lastBatchVirtualizationTime, err := s.state.GetTimeForLatestBatchVirtualization(ctx, nil)
-	// if err != nil && !errors.Is(err, state.ErrNotFound) {
-	// 	log.Warnf("[SeqSender] failed to get last l1 interaction time, err: %v. Sending sequences as a conservative approach", err)
-	// 	return sequences, nil
-	// }
-	// if lastBatchVirtualizationTime.Before(time.Now().Add(-s.cfg.LastBatchVirtualizationTimeMaxWaitPeriod.Duration)) {
-	// 	log.Info("[SeqSender] sequence should be sent to L1, because too long since didn't send anything to L1")
-	// 	return sequences, nil
-	// }
+	if s.latestVirtualTime.Before(time.Now().Add(-s.cfg.LastBatchVirtualizationTimeMaxWaitPeriod.Duration)) {
+		log.Infof("[SeqSender] sequence should be sent, too much time without sending anything to L1")
+		return sequences, nil
+	}
 
-	return sequences, nil
-	// log.Info("[SeqSender] not enough time has passed since last batch was virtualized, and the sequence could be bigger")
-	// return nil, nil
+	log.Infof("[SeqSender] not enough time has passed since last batch was virtualized and the sequence could be bigger")
+	return nil, nil
 }
 
 // handleEstimateGasSendSequenceErr handles an error on the estimate gas. Results: (nil,nil)=requires waiting, (nil,error)=no handled gracefully, (seq,nil) handled gracefully
@@ -493,6 +508,9 @@ func (s *SequenceSender) loadSentSequencesTransactions() error {
 // saveSentSequencesTransactions saves memory structure into persistent file
 func (s *SequenceSender) saveSentSequencesTransactions() error {
 	var err error
+
+	// Purge tx
+	s.purgeEthTx()
 
 	// Ceate file
 	fileName := s.cfg.SequencesTxFileName[0:strings.IndexRune(s.cfg.SequencesTxFileName, '.')] + ".tmp"
@@ -594,7 +612,6 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 	case state.EntryTypeL2BlockEnd:
 		// Handle stream entry: End L2 Block
 		l2BlockEnd := state.DSL2BlockEnd{}.Decode(e.Data)
-		s.prevBlockHash = l2BlockEnd.BlockHash
 
 		if !s.validStream {
 			return nil
@@ -619,7 +636,6 @@ func (s *SequenceSender) closeSequenceBatch() error {
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
 		data.batchClosed = true
-		// data.batch.PrevBlockHash = s.prevBlockHash
 
 		var err error
 		data.batch.BatchL2Data, err = state.EncodeBatchV2(data.batchRaw)
@@ -714,7 +730,6 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	s.mutexSequence.Lock()
 	log.Infof("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:8])
-	// log.Debugf("[SeqSender] ........encoded: [%x]", l2Tx.Encoded)
 
 	// Current L2 block
 	_, blockRaw := s.getWipL2Block()
@@ -764,9 +779,19 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 		log.Errorf("[SeqSender] error getting latest virtual batch, error: %v", err)
 		return errors.New("fail to get latest virtual batch")
 	} else {
-		log.Debugf("[SeqSender] latest virtual batch %d", s.latestVirtualBatch)
+		log.Infof("[SeqSender] latest virtual batch is %d", s.latestVirtualBatch)
 	}
 	return nil
+}
+
+// logFatalf logs error and activates flag to stop sequencing
+func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
+	s.sequencingStopped = true
+	log.Errorf(template, args...)
+	log.Errorf("[SeqSender] Sequencing stopped.")
+	for {
+		time.Sleep(1 * time.Second)
+	}
 }
 
 // printBatchSequences prints the current batches sequence (or just a selected batch) in the memory structure
@@ -792,11 +817,12 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 // }
 
 // printEthTxs prints the current L1 transactions in the memory structure
-func (s *SequenceSender) printEthTxs() {
-	for hash, data := range s.ethTransactions {
-		log.Debugf("[SeqSender] // tx hash %x.. (status: %s, fromBatch: %d, toBatch: %d) hash %x", hash[:4], data.Status, data.FromBatch, data.ToBatch, hash)
-	}
-}
+// func (s *SequenceSender) printEthTxs() {
+// 	for hash, data := range s.ethTransactions {
+// 		log.Debugf("[SeqSender] // tx hash %x.. (sent: %d, update: %d, status: %s, fromBatch: %d, toBatch: %d) hash %x",
+// 			hash[:4], data.SentL1Timestamp, data.StatusTimestamp, data.Status, data.FromBatch, data.ToBatch, hash)
+// 	}
+// }
 
 // printSequences prints data from slice of type sequences
 func printSequences(sequences []types.Sequence) {
