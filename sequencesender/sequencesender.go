@@ -42,6 +42,7 @@ type SequenceSender struct {
 	sequenceData        map[uint64]*sequenceData   // All the batch data indexed by batch number
 	mutexSequence       sync.Mutex                 // Mutex to access sequenceData and sequenceList
 	ethTransactions     map[common.Hash]*ethTxData // All the eth tx sent to L1 indexed by hash
+	ethTxData           map[common.Hash][]byte     // Tx data send or receive to/from L1
 	mutexEthTx          sync.Mutex                 // Mutex to access ethTransactions
 	sequencesTxFile     *os.File                   // Persistence of sent transactions
 	validStream         bool                       // Not valid while receiving data before the desired batch
@@ -58,14 +59,15 @@ type sequenceData struct {
 }
 
 type ethTxData struct {
-	Nonce           uint64    `json:"Nonce"`
-	SentL1Timestamp time.Time `json:"sentL1Timestamp"`
-	StatusTimestamp time.Time `json:"statusTimestamp"`
-	Status          string    `json:"status"`
-	FromBatch       uint64    `json:"fromBatch"`
-	ToBatch         uint64    `json:"toBatch"`
-	MinedAtBlock    big.Int   `json:"MinedAtBlock"`
-	OnMonitor       bool      `json:"onMonitor"`
+	Nonce           uint64         `json:"Nonce"`
+	SentL1Timestamp time.Time      `json:"sentL1Timestamp"`
+	StatusTimestamp time.Time      `json:"statusTimestamp"`
+	Status          string         `json:"status"`
+	FromBatch       uint64         `json:"fromBatch"`
+	ToBatch         uint64         `json:"toBatch"`
+	MinedAtBlock    big.Int        `json:"MinedAtBlock"`
+	OnMonitor       bool           `json:"onMonitor"`
+	To              common.Address `json:"to"`
 }
 
 // New inits sequence sender
@@ -75,6 +77,7 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		cfg:               cfg,
 		etherman:          etherman,
 		ethTransactions:   make(map[common.Hash]*ethTxData),
+		ethTxData:         make(map[common.Hash][]byte),
 		sequenceData:      make(map[uint64]*sequenceData),
 		validStream:       false,
 		latestStreamBatch: 0,
@@ -203,6 +206,7 @@ func (s *SequenceSender) purgeEthTx() {
 
 	for i := 0; i < len(toPurge); i++ {
 		delete(s.ethTransactions, toPurge[i])
+		delete(s.ethTxData, toPurge[i])
 	}
 	s.mutexEthTx.Unlock()
 }
@@ -275,6 +279,17 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	return nil
 }
 
+// copyTxData copies tx data in the internal structure
+func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte) {
+	_, exists := s.ethTxData[txHash]
+	if !exists {
+		s.ethTxData[txHash] = make([]byte, 0)
+	}
+
+	s.ethTxData[txHash] = make([]byte, len(txData))
+	copy(s.ethTxData[txHash], txData)
+}
+
 // updateEthTxResult handles updating transaction state
 func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmanager.MonitoredTxResult) {
 	if txData.Status != txResult.Status.String() {
@@ -282,22 +297,27 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 		txData.StatusTimestamp = time.Now()
 		txData.Status = txResult.Status.String()
 
-		// TODO: Manage according to the state
+		// Manage according to the state
 		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
 			s.logFatalf("[SeqSender] transaction %v result failed!")
-			// TODO: Resend transaction with new nonce
+			// TODO: Stop sending or resend transaction
 		} else if txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String() && txData.ToBatch >= s.latestVirtualBatch {
 			s.latestVirtualTime = txData.StatusTimestamp
 		}
 	}
 
-	// Update info
+	// Update info received from L1
 	txData.Nonce = txResult.Nonce
+	if txResult.To != nil {
+		txData.To = *txResult.To
+	}
 	if txResult.MinedAtBlockNumber != nil {
 		txData.MinedAtBlock = *txResult.MinedAtBlockNumber
 	}
+	s.copyTxData(txResult.ID, txResult.Data)
 }
 
+// getResultAndUpdateEthTx updates the tx status from the ethTxManager
 func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash common.Hash) error {
 	txData, exists := s.ethTransactions[txHash]
 	if !exists {
@@ -309,7 +329,8 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 	if err == ethtxmanager.ErrNotFound {
 		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager. Marking it", txHash)
 		txData.OnMonitor = false
-		// TODO: resend tx with same nonce?
+		// Resend tx?
+		// _ = s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
 	} else if err != nil {
 		log.Errorf("[SeqSender] Error getting result for tx %v: %v", txHash, err)
 		return err
@@ -371,7 +392,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
 	printSequences(sequences)
 
-	// Add sequence
+	// Build sequence data
 	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
@@ -380,27 +401,75 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	// Add sequence tx
-	txHash, err := s.ethTxManager.Add(ctx, to, &s.currentNonce, big.NewInt(0), data)
+	err = s.sendTx(ctx, false, nil, to, firstSequence.BatchNumber, lastSequence.BatchNumber, data)
 	if err != nil {
-		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
 		waitTick(ctx, ticker)
 		return
 	}
-	s.currentNonce++
+}
+
+// sendTx adds transaction to the ethTxManager to send it to L1
+func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *common.Hash, to *common.Address, fromBatch uint64, toBatch uint64, data []byte) error {
+	// Params if new tx to send or resend a previous tx
+	var paramTo *common.Address
+	var paramNonce *uint64
+	var paramData []byte
+	var valueFromBatch uint64
+	var valueToBatch uint64
+	var valueToAddress common.Address
+
+	if !resend {
+		paramTo = to
+		paramNonce = &s.currentNonce
+		paramData = data
+		valueFromBatch = fromBatch
+		valueToBatch = toBatch
+	} else {
+		if txOldHash == nil {
+			log.Errorf("[SeqSender] trying to resend a tx with nil hash")
+			return errors.New("resend tx nil hash")
+		}
+		paramTo = &s.ethTransactions[*txOldHash].To
+		paramNonce = &s.ethTransactions[*txOldHash].Nonce
+		paramData = s.ethTxData[*txOldHash]
+		valueFromBatch = s.ethTransactions[*txOldHash].FromBatch
+		valueToBatch = s.ethTransactions[*txOldHash].ToBatch
+	}
+	if paramTo != nil {
+		valueToAddress = *paramTo
+	}
+
+	// Add sequence tx
+	txHash, err := s.ethTxManager.Add(ctx, paramTo, paramNonce, big.NewInt(0), paramData)
+	if err != nil {
+		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
+		return err
+	}
+	if !resend {
+		s.currentNonce++
+	}
 
 	// Add new eth tx
 	txData := ethTxData{
 		SentL1Timestamp: time.Now(),
 		StatusTimestamp: time.Now(),
 		Status:          "*new",
-		FromBatch:       firstSequence.BatchNumber,
-		ToBatch:         lastSequence.BatchNumber,
+		FromBatch:       valueFromBatch,
+		ToBatch:         valueToBatch,
 		OnMonitor:       true,
+		To:              valueToAddress,
 	}
+
+	// Add tx to internal structure
 	s.mutexEthTx.Lock()
 	s.ethTransactions[txHash] = &txData
+	s.copyTxData(txHash, paramData)
 	_ = s.getResultAndUpdateEthTx(ctx, txHash)
-	s.latestSentToL1Batch = lastSequence.BatchNumber
+	if !resend {
+		s.latestSentToL1Batch = valueToBatch
+	} else {
+		s.ethTransactions[*txOldHash].Status = "*resent"
+	}
 	s.mutexEthTx.Unlock()
 
 	// Save sent sequences
@@ -408,6 +477,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	if err != nil {
 		log.Errorf("[SeqSender] error saving tx sequence sent, error: %v", err)
 	}
+	return nil
 }
 
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
@@ -670,12 +740,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 
 		// Add end block data
 		s.addInfoSequenceBatch(l2BlockEnd)
-
-	case state.EntryTypeUpdateGER:
-		// Handle stream entry: Update GER
-		// TODO: What should I do
 	}
-
 	return nil
 }
 
@@ -731,7 +796,7 @@ func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) 
 	s.mutexSequence.Unlock()
 }
 
-// addInfoSequenceBatch adds info
+// addInfoSequenceBatch adds info from the block end data
 func (s *SequenceSender) addInfoSequenceBatch(l2BlockEnd state.DSL2BlockEnd) {
 	s.mutexSequence.Lock()
 
