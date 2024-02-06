@@ -47,6 +47,9 @@ type Config struct {
 	// WaitPeriodPurgeTxFile is the time to wait before purging from file the finished sent L1 tx
 	WaitPeriodPurgeTxFile types.Duration `mapstructure:"WaitPeriodPurgeTxFile"`
 
+	// MaxPendingTx is the maximum number of pending transactions (those that are not in a final state)
+	MaxPendingTx uint64
+
 	// StreamClient is the config for the stream client
 	StreamClient StreamClientCfg `mapstructure:"StreamClient"`
 
