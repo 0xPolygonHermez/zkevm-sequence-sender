@@ -14,6 +14,43 @@ Stateless autonomous binary to sequence L2 batches and send them to L1.
 
 - **EthTxManager**: [Library](https://github.com/0xPolygonHermez/zkevm-ethtx-manager) used for sending and monitoring L1 transactions.
 
+
+## File
+An example of the content of the JSON persistence file.
+```
+{
+  "0x602c800c4f7a9c95877ced446f67997f4c3f19940b42a18116976395319e0697": {
+    "nonce": 19,
+    "status": "mined",
+    "sentL1Timestamp": "2024-02-07T10:04:37.628391558+01:00",
+    "statusTimestamp": "2024-02-07T10:04:52.612031307+01:00",
+    "fromBatch": 3,
+    "toBatch": 3,
+    "minedAtBlock": 196,
+    "onMonitor": true,
+    "to": "0x8daf17a20c9dba35f005b6324f493785d239719d",
+    "txs": {
+      "0x46b57b78245c2678d6d03396f6e11db5cfd5ef6147e83d089e62722a19cb86e3": {
+        "revertMessage": ""
+      }
+    }
+  },
+  "0xc6bd02700b9456842503bb05a878f6b049b49eb863c77ca47bd526bb4ee53985": {
+    "nonce": 20,
+    "status": "created",
+    "sentL1Timestamp": "2024-02-07T10:05:07.631269379+01:00",
+    "statusTimestamp": "2024-02-07T10:05:07.631286009+01:00",
+    "fromBatch": 4,
+    "toBatch": 4,
+    "minedAtBlock": 0,
+    "onMonitor": true,
+    "to": "0x8daf17a20c9dba35f005b6324f493785d239719d",
+    "txs": {}
+  }
+}
+```
+
+
 ## Config
 To the existing configuration in the SequenceSender from the [Node](https://github.com/0xPolygonHermez/zkevm-node), the following configuration parameters have been added.
 

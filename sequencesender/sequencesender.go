@@ -42,7 +42,7 @@ type SequenceSender struct {
 	sequenceData        map[uint64]*sequenceData   // All the batch data indexed by batch number
 	mutexSequence       sync.Mutex                 // Mutex to access sequenceData and sequenceList
 	ethTransactions     map[common.Hash]*ethTxData // All the eth tx sent to L1 indexed by hash
-	ethTxData           map[common.Hash][]byte     // Tx data send or receive to/from L1
+	ethTxData           map[common.Hash][]byte     // Tx data send to or received from L1
 	mutexEthTx          sync.Mutex                 // Mutex to access ethTransactions
 	sequencesTxFile     *os.File                   // Persistence of sent transactions
 	validStream         bool                       // Not valid while receiving data before the desired batch
@@ -59,15 +59,20 @@ type sequenceData struct {
 }
 
 type ethTxData struct {
-	Nonce           uint64         `json:"Nonce"`
-	SentL1Timestamp time.Time      `json:"sentL1Timestamp"`
-	StatusTimestamp time.Time      `json:"statusTimestamp"`
-	Status          string         `json:"status"`
-	FromBatch       uint64         `json:"fromBatch"`
-	ToBatch         uint64         `json:"toBatch"`
-	MinedAtBlock    big.Int        `json:"MinedAtBlock"`
-	OnMonitor       bool           `json:"onMonitor"`
-	To              common.Address `json:"to"`
+	Nonce           uint64                              `json:"nonce"`
+	Status          string                              `json:"status"`
+	SentL1Timestamp time.Time                           `json:"sentL1Timestamp"`
+	StatusTimestamp time.Time                           `json:"statusTimestamp"`
+	FromBatch       uint64                              `json:"fromBatch"`
+	ToBatch         uint64                              `json:"toBatch"`
+	MinedAtBlock    big.Int                             `json:"minedAtBlock"`
+	OnMonitor       bool                                `json:"onMonitor"`
+	To              common.Address                      `json:"to"`
+	Txs             map[common.Hash]ethTxAdditionalData `json:"txs"`
+}
+
+type ethTxAdditionalData struct {
+	RevertMessage string `json:"revertMessage"`
 }
 
 // New inits sequence sender
@@ -280,14 +285,17 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 }
 
 // copyTxData copies tx data in the internal structure
-func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte) {
-	_, exists := s.ethTxData[txHash]
-	if !exists {
-		s.ethTxData[txHash] = make([]byte, 0)
-	}
-
+func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResults map[common.Hash]ethtxmanager.TxResult) {
 	s.ethTxData[txHash] = make([]byte, len(txData))
 	copy(s.ethTxData[txHash], txData)
+
+	s.ethTransactions[txHash].Txs = make(map[common.Hash]ethTxAdditionalData, 0)
+	for hash, result := range txsResults {
+		add := ethTxAdditionalData{
+			RevertMessage: result.RevertMessage,
+		}
+		s.ethTransactions[txHash].Txs[hash] = add
+	}
 }
 
 // updateEthTxResult handles updating transaction state
@@ -314,7 +322,7 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 	if txResult.MinedAtBlockNumber != nil {
 		txData.MinedAtBlock = *txResult.MinedAtBlockNumber
 	}
-	s.copyTxData(txResult.ID, txResult.Data)
+	s.copyTxData(txResult.ID, txResult.Data, txResult.Txs)
 }
 
 // getResultAndUpdateEthTx updates the tx status from the ethTxManager
@@ -361,6 +369,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 
 	// Check if the sequence sending is stopped
 	if s.seqSendingStopped {
+		log.Warnf("[SeqSender] sending is stopped!")
 		waitTick(ctx, ticker)
 		return
 	}
@@ -463,7 +472,8 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	// Add tx to internal structure
 	s.mutexEthTx.Lock()
 	s.ethTransactions[txHash] = &txData
-	s.copyTxData(txHash, paramData)
+	txResults := make(map[common.Hash]ethtxmanager.TxResult, 0)
+	s.copyTxData(txHash, paramData, txResults)
 	_ = s.getResultAndUpdateEthTx(ctx, txHash)
 	if !resend {
 		s.latestSentToL1Batch = valueToBatch
@@ -714,6 +724,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 			// Create new sequential batch
 			s.addNewSequenceBatch(l2BlockStart)
 		}
+		// TODO: what to do if new batch is smaller than the current one
 
 		// Add L2 block
 		s.addNewBatchL2Block(l2BlockStart)
@@ -768,31 +779,29 @@ func (s *SequenceSender) closeSequenceBatch() error {
 // addNewSequenceBatch adds a new batch to the sequence
 func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) {
 	s.mutexSequence.Lock()
-	if s.sequenceData[l2BlockStart.BatchNumber] == nil {
-		log.Infof("[SeqSender] ...new batch, number %d", l2BlockStart.BatchNumber)
+	log.Infof("[SeqSender] ...new batch, number %d", l2BlockStart.BatchNumber)
 
-		// Create sequence
-		sequence := types.Sequence{
-			GlobalExitRoot: l2BlockStart.GlobalExitRoot,
-			Timestamp:      l2BlockStart.Timestamp,
-			BatchNumber:    l2BlockStart.BatchNumber,
-		}
-
-		// Add to the list
-		s.sequenceList = append(s.sequenceList, l2BlockStart.BatchNumber)
-
-		// Create initial data
-		batchRaw := state.BatchRawV2{}
-		data := sequenceData{
-			batchClosed: false,
-			batch:       &sequence,
-			batchRaw:    &batchRaw,
-		}
-		s.sequenceData[l2BlockStart.BatchNumber] = &data
-
-		// Update wip batch
-		s.wipBatch = l2BlockStart.BatchNumber
+	// Create sequence
+	sequence := types.Sequence{
+		GlobalExitRoot: l2BlockStart.GlobalExitRoot,
+		Timestamp:      l2BlockStart.Timestamp,
+		BatchNumber:    l2BlockStart.BatchNumber,
 	}
+
+	// Add to the list
+	s.sequenceList = append(s.sequenceList, l2BlockStart.BatchNumber)
+
+	// Create initial data
+	batchRaw := state.BatchRawV2{}
+	data := sequenceData{
+		batchClosed: false,
+		batch:       &sequence,
+		batchRaw:    &batchRaw,
+	}
+	s.sequenceData[l2BlockStart.BatchNumber] = &data
+
+	// Update wip batch
+	s.wipBatch = l2BlockStart.BatchNumber
 	s.mutexSequence.Unlock()
 }
 
