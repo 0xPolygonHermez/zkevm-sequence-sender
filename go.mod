@@ -154,6 +154,6 @@ require (
 )
 
 require (
-	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.0.6
+	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.0.8
 	github.com/0xPolygonHermez/zkevm-node v0.5.0
 )

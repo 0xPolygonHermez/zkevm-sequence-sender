@@ -29,6 +29,7 @@ func start(cliCtx *cli.Context) error {
 		logVersion()
 	}
 
+	c.SequenceSender.Log = c.Log
 	seqSender := createSequenceSender(*c)
 	go seqSender.Start(cliCtx.Context)
 	waitSignal(nil)

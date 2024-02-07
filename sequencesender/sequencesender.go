@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
+	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
@@ -97,6 +99,11 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 	}
 
 	// Create ethtxmanager client
+	cfg.EthTxManager.Log = ethtxlog.Config{
+		Environment: ethtxlog.LogEnvironment(cfg.Log.Environment),
+		Level:       cfg.Log.Level,
+		Outputs:     cfg.Log.Outputs,
+	}
 	s.ethTxManager, err = ethtxmanager.New(cfg.EthTxManager)
 	if err != nil {
 		log.Fatalf("[SeqSender] error creating ethtxmanager client: %v", err)
@@ -172,25 +179,47 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	}
 }
 
-// func (s *SequenceSender) purgeSequences(batchNumber uint64) {
-// 	s.mutexSequence.Lock()
-// 	truncateUntil := 0
-// 	for i := 0; i < len(s.sequenceList); i++ {
-// 		batchNumber := s.sequenceList[i]
-// 		if batchNumber <= s.latestVirtualBatch {
-// 			truncateUntil = i + 1
-// 		}
-// 	}
+// purgeSequences purges batches from memory structures
+func (s *SequenceSender) purgeSequences() {
+	// If sequence sending is stopped, do not purge
+	if s.seqSendingStopped {
+		return
+	}
 
-// 	if truncateUntil > 0 {
-// 		s.sequenceList = s.sequenceList[truncateUntil:]
-// 	}
-// 	s.mutexSequence.Unlock()
-// }
+	// Purge the information of batches that are already virtualized
+	s.mutexSequence.Lock()
+	truncateUntil := 0
+	toPurge := make([]uint64, 0)
+	for i := 0; i < len(s.sequenceList); i++ {
+		batchNumber := s.sequenceList[i]
+		if batchNumber <= s.latestVirtualBatch {
+			truncateUntil = i + 1
+			toPurge = append(toPurge, batchNumber)
+		}
+	}
 
-// purgeEthTx purges transactions from memory structure
+	if len(toPurge) > 0 {
+		s.sequenceList = s.sequenceList[truncateUntil:]
+
+		var firstPurged uint64
+		var lastPurged uint64
+		for i := 0; i < len(toPurge); i++ {
+			if i == 0 {
+				firstPurged = toPurge[i]
+			}
+			if i == len(toPurge)-1 {
+				lastPurged = toPurge[i]
+			}
+			delete(s.sequenceData, toPurge[i])
+		}
+		log.Infof("[SeqSender] batches purged count: %d, fromBatch: %d, toBatch: %d", len(toPurge), firstPurged, lastPurged)
+	}
+	s.mutexSequence.Unlock()
+}
+
+// purgeEthTx purges transactions from memory structures
 func (s *SequenceSender) purgeEthTx() {
-	// If sequencing is stopped, do not purge
+	// If sequence sending is stopped, do not purge
 	if s.seqSendingStopped {
 		return
 	}
@@ -209,9 +238,20 @@ func (s *SequenceSender) purgeEthTx() {
 		}
 	}
 
-	for i := 0; i < len(toPurge); i++ {
-		delete(s.ethTransactions, toPurge[i])
-		delete(s.ethTxData, toPurge[i])
+	if len(toPurge) > 0 {
+		var firstPurged uint64 = math.MaxUint64
+		var lastPurged uint64
+		for i := 0; i < len(toPurge); i++ {
+			if s.ethTransactions[toPurge[i]].Nonce < firstPurged {
+				firstPurged = s.ethTransactions[toPurge[i]].Nonce
+			}
+			if s.ethTransactions[toPurge[i]].Nonce > lastPurged {
+				lastPurged = s.ethTransactions[toPurge[i]].Nonce
+			}
+			delete(s.ethTransactions, toPurge[i])
+			delete(s.ethTxData, toPurge[i])
+		}
+		log.Infof("[SeqSender] txs purged count: %d, fromNonce: %d, toNonce: %d", len(toPurge), firstPurged, lastPurged)
 	}
 	s.mutexEthTx.Unlock()
 }
@@ -415,6 +455,9 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 		waitTick(ctx, ticker)
 		return
 	}
+
+	// Purge sequences data from memory
+	s.purgeSequences()
 }
 
 // sendTx adds transaction to the ethTxManager to send it to L1
@@ -493,6 +536,8 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
 func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequence, error) {
 	// Add sequences until too big for a single L1 tx or last batch is reached
+	s.mutexSequence.Lock()
+	defer s.mutexSequence.Unlock()
 	sequences := []types.Sequence{}
 	for i := 0; i < len(s.sequenceList); i++ {
 		batchNumber := s.sequenceList[i]
@@ -694,25 +739,20 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 			if l2BlockStart.BatchNumber != s.latestStreamBatch {
 				log.Infof("[SeqSender] skipped! batch already virtualized, number %d", l2BlockStart.BatchNumber)
 			}
-		} else {
+		} else if !s.validStream && l2BlockStart.BatchNumber == s.fromStreamBatch+1 {
+			// Initial case after startup
+			s.addNewSequenceBatch(l2BlockStart)
 			s.validStream = true
 		}
 
 		// Latest stream batch
 		s.latestStreamBatch = l2BlockStart.BatchNumber
-
 		if !s.validStream {
 			return nil
 		}
 
-		// Manage if it is a new block or new batch
-		if l2BlockStart.BatchNumber == s.wipBatch {
-			// New block in the current batch
-			if s.wipBatch == s.fromStreamBatch+1 {
-				// Initial case after startup
-				s.addNewSequenceBatch(l2BlockStart)
-			}
-		} else if l2BlockStart.BatchNumber > s.wipBatch {
+		// Handle whether it's only a new block or also a new batch
+		if l2BlockStart.BatchNumber > s.wipBatch {
 			// New batch in the sequence
 			// Close current batch
 			err := s.closeSequenceBatch()
@@ -758,7 +798,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 // closeSequenceBatch closes the current batch
 func (s *SequenceSender) closeSequenceBatch() error {
 	s.mutexSequence.Lock()
-	log.Debugf("[SeqSender] Closing batch %d", s.wipBatch)
+	log.Infof("[SeqSender] Closing batch %d", s.wipBatch)
 
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
@@ -780,6 +820,12 @@ func (s *SequenceSender) closeSequenceBatch() error {
 func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) {
 	s.mutexSequence.Lock()
 	log.Infof("[SeqSender] ...new batch, number %d", l2BlockStart.BatchNumber)
+
+	if l2BlockStart.BatchNumber > s.wipBatch+1 {
+		log.Warnf("[SeqSender] new batch number (%d) is not consecutive to the current one (%d). Batches gap!", l2BlockStart.BatchNumber, s.wipBatch)
+	} else if l2BlockStart.BatchNumber < s.wipBatch {
+		s.logFatalf("[SeqSender] new batch number (%d) is lower than the current one (%d)", l2BlockStart.BatchNumber, s.wipBatch)
+	}
 
 	// Create sequence
 	sequence := types.Sequence{
@@ -909,11 +955,11 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 	return nil
 }
 
-// logFatalf logs error and activates flag to stop sequencing
+// logFatalf logs error, activates flag to stop sequencing, and remains in an infinite loop
 func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 	s.seqSendingStopped = true
 	log.Errorf(template, args...)
-	log.Errorf("[SeqSender] Sequencing stopped.")
+	log.Errorf("[SeqSender] Sequence sending stopped.")
 	for {
 		time.Sleep(1 * time.Second)
 	}
@@ -952,7 +998,7 @@ func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 // printSequences prints data from slice of type sequences
 func printSequences(sequences []types.Sequence) {
 	for i, seq := range sequences {
-		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
+		log.Infof("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
 	}
 }
 

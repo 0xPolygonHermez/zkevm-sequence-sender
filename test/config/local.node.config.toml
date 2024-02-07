@@ -2,7 +2,7 @@ IsTrustedSequencer = true
 
 [Log]
 Environment = "development" # "production" or "development"
-Level = "debug"
+Level = "info"
 Outputs = ["stderr"]
 
 [State]
@@ -127,7 +127,7 @@ MaxTxSizeForL1 = 131072
 L2Coinbase = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 PrivateKey = {Path = "./test/sequencer.keystore", Password = "testonly"}
 SequencesTxFileName = "sequencesender.json"
-WaitPeriodPurgeTxFile = "48h"
+WaitPeriodPurgeTxFile = "15m"
 MaxPendingTx = 1
 	[SequenceSender.StreamClient]
 		Server = "127.0.0.1:6900"

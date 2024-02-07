@@ -55,6 +55,9 @@ type Config struct {
 
 	// EthTxManager is the config for the ethtxmanager
 	EthTxManager ethtxmanager.Config `mapstructure:"EthTxManager"`
+
+	// Log is the log configuration
+	Log log.Config `mapstructure:"Log"`
 }
 
 // StreamClientCfg contains the data streamer's configuration properties
