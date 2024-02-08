@@ -70,11 +70,19 @@ type ethTxData struct {
 	MinedAtBlock    big.Int                             `json:"minedAtBlock"`
 	OnMonitor       bool                                `json:"onMonitor"`
 	To              common.Address                      `json:"to"`
+	StateHistory    []stateTransition                   `json:"stateHistory"`
 	Txs             map[common.Hash]ethTxAdditionalData `json:"txs"`
 }
 
 type ethTxAdditionalData struct {
-	RevertMessage string `json:"revertMessage"`
+	GasPrice      *big.Int `json:"gasPrice"`
+	RevertMessage string   `json:"revertMessage"`
+}
+
+type stateTransition struct {
+	ChangeTimestamp time.Time
+	FromState       string
+	ToState         string
 }
 
 // New inits sequence sender
@@ -166,13 +174,18 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	s.wipBatch = s.latestVirtualBatch + 1
 	s.latestSentToL1Batch = s.latestVirtualBatch
 
+	// Start sequence sending
+	go s.sequencing(ctx)
+
 	// Start receiving the streaming
 	err = s.streamClient.ExecCommand(datastreamer.CmdStartBookmark)
 	if err != nil {
 		log.Fatalf("[SeqSender] failed to connect to the streaming")
 	}
+}
 
-	// Start sending sequences
+// sequencing
+func (s *SequenceSender) sequencing(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.WaitPeriodSendSequence.Duration)
 	for {
 		s.tryToSendSequence(ctx, ticker)
@@ -331,7 +344,13 @@ func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResult
 
 	s.ethTransactions[txHash].Txs = make(map[common.Hash]ethTxAdditionalData, 0)
 	for hash, result := range txsResults {
+		var gasPrice *big.Int
+		if result.Tx != nil {
+			gasPrice = result.Tx.GasPrice()
+		}
+
 		add := ethTxAdditionalData{
+			GasPrice:      gasPrice,
 			RevertMessage: result.RevertMessage,
 		}
 		s.ethTransactions[txHash].Txs[hash] = add
@@ -343,12 +362,17 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 	if txData.Status != txResult.Status.String() {
 		log.Infof("[SeqSender] update transaction %v to state %s", txResult.ID, txResult.Status.String())
 		txData.StatusTimestamp = time.Now()
+		stTrans := stateTransition{
+			ChangeTimestamp: txData.StatusTimestamp,
+			FromState:       txData.Status,
+			ToState:         txResult.Status.String(),
+		}
 		txData.Status = txResult.Status.String()
+		txData.StateHistory = append(txData.StateHistory, stTrans)
 
 		// Manage according to the state
 		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
 			s.logFatalf("[SeqSender] transaction %v result failed!")
-			// TODO: Stop sending or resend transaction
 		} else if txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String() && txData.ToBatch >= s.latestVirtualBatch {
 			s.latestVirtualTime = txData.StatusTimestamp
 		}
@@ -392,7 +416,7 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 // tryToSendSequence checks if there is a sequence and it's worth it to send to L1
 func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Ticker) {
 	// Update latest virtual batch
-	log.Debugf("[SeqSender] updating virtual batch")
+	log.Infof("[SeqSender] updating virtual batch")
 	err := s.updateLatestVirtualBatch()
 	if err != nil {
 		waitTick(ctx, ticker)
@@ -400,7 +424,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	// Update state of transactions
-	log.Debugf("[SeqSender] updating tx results")
+	log.Infof("[SeqSender] updating tx results")
 	countPending, err := s.syncEthTxResults(ctx)
 	if err != nil {
 		waitTick(ctx, ticker)
@@ -422,13 +446,11 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	}
 
 	// Check if should send sequence to L1
-	log.Debugf("[SeqSender] getting sequences to send")
+	log.Infof("[SeqSender] getting sequences to send")
 	sequences, err := s.getSequencesToSend(ctx)
 	if err != nil || len(sequences) == 0 {
 		if err != nil {
 			log.Errorf("[SeqSender] error getting sequences: %v", err)
-		} else {
-			log.Infof("[SeqSender] waiting for sequences to be worth sending to L1")
 		}
 		waitTick(ctx, ticker)
 		return
@@ -822,7 +844,7 @@ func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) 
 	log.Infof("[SeqSender] ...new batch, number %d", l2BlockStart.BatchNumber)
 
 	if l2BlockStart.BatchNumber > s.wipBatch+1 {
-		log.Warnf("[SeqSender] new batch number (%d) is not consecutive to the current one (%d). Batches gap!", l2BlockStart.BatchNumber, s.wipBatch)
+		s.logFatalf("[SeqSender] new batch number (%d) is not consecutive to the current one (%d)", l2BlockStart.BatchNumber, s.wipBatch)
 	} else if l2BlockStart.BatchNumber < s.wipBatch {
 		s.logFatalf("[SeqSender] new batch number (%d) is lower than the current one (%d)", l2BlockStart.BatchNumber, s.wipBatch)
 	}
