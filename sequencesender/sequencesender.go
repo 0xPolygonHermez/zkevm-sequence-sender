@@ -81,8 +81,7 @@ type ethTxAdditionalData struct {
 
 type stateTransition struct {
 	ChangeTimestamp time.Time
-	FromState       string
-	ToState         string
+	Transition      string
 }
 
 // New inits sequence sender
@@ -364,8 +363,7 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 		txData.StatusTimestamp = time.Now()
 		stTrans := stateTransition{
 			ChangeTimestamp: txData.StatusTimestamp,
-			FromState:       txData.Status,
-			ToState:         txResult.Status.String(),
+			Transition:      txData.Status + " - " + txResult.Status.String(),
 		}
 		txData.Status = txResult.Status.String()
 		txData.StateHistory = append(txData.StateHistory, stTrans)
