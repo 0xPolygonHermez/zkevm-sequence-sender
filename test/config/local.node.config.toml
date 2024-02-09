@@ -10,15 +10,15 @@ MaxTxSizeForL1 = 131072
 L2Coinbase = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 PrivateKey = {Path = "./test/sequencer.keystore", Password = "testonly"}
 SequencesTxFileName = "sequencesender.json"
-WaitPeriodPurgeTxFile = "15m"
+WaitPeriodPurgeTxFile = "60m"
 MaxPendingTx = 1
 	[SequenceSender.StreamClient]
 		Server = "127.0.0.1:6900"
 	[SequenceSender.EthTxManager]
 		FrequencyToMonitorTxs = "1s"
 		WaitTxToBeMined = "2m"
-		ConsolidationL1ConfirmationBlocks = 10
-		FinalizationL1ConfirmationBlocks = 20
+		ConsolidationL1ConfirmationBlocks = 5
+		FinalizationL1ConfirmationBlocks = 10
 		PrivateKeys = [
 			{Path = "./test/sequencer.keystore", Password = "testonly"},
 		]

@@ -75,7 +75,7 @@ type ethTxData struct {
 }
 
 type ethTxAdditionalData struct {
-	GasPrice      *big.Int `json:"gasPrice"`
+	GasPrice      *big.Int `json:"gasPrice,omitempty"`
 	RevertMessage string   `json:"revertMessage,omitempty"`
 }
 
@@ -180,9 +180,9 @@ func (s *SequenceSender) Start(ctx context.Context) {
 
 // sequenceSending starts loop to check if there are sequences to send and sends them if it's convenient
 func (s *SequenceSender) sequenceSending(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.WaitPeriodSendSequence.Duration)
 	for {
-		s.tryToSendSequence(ctx, ticker)
+		s.tryToSendSequence(ctx)
+		time.Sleep(s.cfg.WaitPeriodSendSequence.Duration)
 	}
 }
 
@@ -225,7 +225,7 @@ func (s *SequenceSender) purgeSequences() {
 }
 
 // purgeEthTx purges transactions from memory structures
-func (s *SequenceSender) purgeEthTx() {
+func (s *SequenceSender) purgeEthTx(ctx context.Context) {
 	// If sequence sending is stopped, do not purge
 	if s.seqSendingStopped {
 		return
@@ -242,6 +242,16 @@ func (s *SequenceSender) purgeEthTx() {
 
 		if !data.OnMonitor || data.Status == ethtxmanager.MonitoredTxStatusFinalized.String() {
 			toPurge = append(toPurge, hash)
+
+			// Remove from tx monitor
+			if data.OnMonitor {
+				err := s.ethTxManager.Remove(ctx, hash)
+				if err != nil {
+					log.Warnf("[SeqSender] error removing monitor tx %v from ethtxmanager: %v", hash, err)
+				} else {
+					log.Infof("[SeqSender] removed monitor tx %v from ethtxmanager", hash)
+				}
+			}
 		}
 	}
 
@@ -269,11 +279,6 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 	var txPending uint64
 	for hash, data := range s.ethTransactions {
 		if data.Status == ethtxmanager.MonitoredTxStatusFinalized.String() {
-			// Remove from tx monitor
-			// err := s.ethTxManager.Remove(ctx, hash)
-			// if err != nil {
-			// 	log.Warnf("[SeqSender] error removing tx (%v) from ethtxmanager: %v", hash, err)
-			// }
 			continue
 		}
 
@@ -290,7 +295,7 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 	s.mutexEthTx.Unlock()
 
 	// Save updated sequences transactions
-	err := s.saveSentSequencesTransactions()
+	err := s.saveSentSequencesTransactions(ctx)
 	if err != nil {
 		log.Errorf("[SeqSender] error saving tx sequence, error: %v", err)
 	}
@@ -328,7 +333,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	s.mutexEthTx.Unlock()
 
 	// Save updated sequences transactions
-	err = s.saveSentSequencesTransactions()
+	err = s.saveSentSequencesTransactions(ctx)
 	if err != nil {
 		log.Errorf("[SeqSender] error saving tx sequence, error: %v", err)
 	}
@@ -409,12 +414,11 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 }
 
 // tryToSendSequence checks if there is a sequence and it's worth it to send to L1
-func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Ticker) {
+func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	// Update latest virtual batch
 	log.Infof("[SeqSender] updating virtual batch")
 	err := s.updateLatestVirtualBatch()
 	if err != nil {
-		waitTick(ctx, ticker)
 		return
 	}
 
@@ -422,21 +426,18 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	log.Infof("[SeqSender] updating tx results")
 	countPending, err := s.syncEthTxResults(ctx)
 	if err != nil {
-		waitTick(ctx, ticker)
 		return
 	}
 
 	// Check if the sequence sending is stopped
 	if s.seqSendingStopped {
 		log.Warnf("[SeqSender] sending is stopped!")
-		waitTick(ctx, ticker)
 		return
 	}
 
 	// Check if reached the maximum number of pending transactions
 	if countPending >= s.cfg.MaxPendingTx {
 		log.Infof("[SeqSender] max number of pending txs (%d) reached. Waiting for some to be completed", countPending)
-		waitTick(ctx, ticker)
 		return
 	}
 
@@ -447,7 +448,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 		if err != nil {
 			log.Errorf("[SeqSender] error getting sequences: %v", err)
 		}
-		waitTick(ctx, ticker)
 		return
 	}
 
@@ -462,14 +462,12 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context, ticker *time.Tic
 	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
-		waitTick(ctx, ticker)
 		return
 	}
 
 	// Add sequence tx
 	err = s.sendTx(ctx, false, nil, to, firstSequence.BatchNumber, lastSequence.BatchNumber, data)
 	if err != nil {
-		waitTick(ctx, ticker)
 		return
 	}
 
@@ -543,7 +541,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	s.mutexEthTx.Unlock()
 
 	// Save sent sequences
-	err = s.saveSentSequencesTransactions()
+	err = s.saveSentSequencesTransactions(ctx)
 	if err != nil {
 		log.Errorf("[SeqSender] error saving tx sequence sent, error: %v", err)
 	}
@@ -659,15 +657,6 @@ func isDataForEthTxTooBig(err error) bool {
 		errors.Is(err, etherman.ErrContentLengthTooLarge)
 }
 
-func waitTick(ctx context.Context, ticker *time.Ticker) {
-	select {
-	case <-ticker.C:
-		// nothing
-	case <-ctx.Done():
-		return
-	}
-}
-
 // loadSentSequencesTransactions loads the file into the memory structure
 func (s *SequenceSender) loadSentSequencesTransactions() error {
 	// Check if file exists
@@ -699,11 +688,11 @@ func (s *SequenceSender) loadSentSequencesTransactions() error {
 }
 
 // saveSentSequencesTransactions saves memory structure into persistent file
-func (s *SequenceSender) saveSentSequencesTransactions() error {
+func (s *SequenceSender) saveSentSequencesTransactions(ctx context.Context) error {
 	var err error
 
 	// Purge tx
-	s.purgeEthTx()
+	s.purgeEthTx(ctx)
 
 	// Ceate file
 	fileName := s.cfg.SequencesTxFileName[0:strings.IndexRune(s.cfg.SequencesTxFileName, '.')] + ".tmp"
