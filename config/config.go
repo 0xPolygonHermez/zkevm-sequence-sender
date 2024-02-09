@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	newtxman "github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/sequencesender"
 	"github.com/mitchellh/mapstructure"
@@ -59,10 +57,6 @@ You could find some examples:
 type Config struct {
 	// Configure Log level for all the services, allow also to store the logs in a file
 	Log log.Config
-	// Configuration of the etherman (client for access L1)
-	Etherman etherman.Config
-	// Configuration for ethereum transaction manager
-	EthTxManager newtxman.Config
 	// Configuration of the sequence sender service
 	SequenceSender sequencesender.Config
 	// Configuration of the genesis of the network. This is used to known the initial state of the network

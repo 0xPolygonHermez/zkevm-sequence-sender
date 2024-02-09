@@ -70,18 +70,13 @@ type ethTxData struct {
 	MinedAtBlock    big.Int                             `json:"minedAtBlock"`
 	OnMonitor       bool                                `json:"onMonitor"`
 	To              common.Address                      `json:"to"`
-	StateHistory    []stateTransition                   `json:"stateHistory"`
+	StateHistory    []string                            `json:"stateHistory"`
 	Txs             map[common.Hash]ethTxAdditionalData `json:"txs"`
 }
 
 type ethTxAdditionalData struct {
 	GasPrice      *big.Int `json:"gasPrice"`
-	RevertMessage string   `json:"revertMessage"`
-}
-
-type stateTransition struct {
-	ChangeTimestamp time.Time
-	Transition      string
+	RevertMessage string   `json:"revertMessage,omitempty"`
 }
 
 // New inits sequence sender
@@ -361,10 +356,7 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 	if txData.Status != txResult.Status.String() {
 		log.Infof("[SeqSender] update transaction %v to state %s", txResult.ID, txResult.Status.String())
 		txData.StatusTimestamp = time.Now()
-		stTrans := stateTransition{
-			ChangeTimestamp: txData.StatusTimestamp,
-			Transition:      txData.Status + " - " + txResult.Status.String(),
-		}
+		stTrans := txData.StatusTimestamp.Format("2006-01-02T15:04:05.000-07:00") + ", " + txData.Status + ", " + txResult.Status.String()
 		txData.Status = txResult.Status.String()
 		txData.StateHistory = append(txData.StateHistory, stTrans)
 
@@ -888,7 +880,7 @@ func (s *SequenceSender) addInfoSequenceBatch(l2BlockEnd state.DSL2BlockEnd) {
 // addNewBatchL2Block adds a new L2 block to the work in progress batch
 func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d), GER %x..", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber, l2BlockStart.GlobalExitRoot[:8])
+	log.Infof("[SeqSender] .....new L2 block, number %d (batch %d)", l2BlockStart.L2BlockNumber, l2BlockStart.BatchNumber)
 
 	// Current batch
 	data := s.sequenceData[s.wipBatch]

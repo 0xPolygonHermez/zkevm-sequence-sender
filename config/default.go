@@ -61,30 +61,6 @@ GlobalQueue = 1024
 	Port = "5432"
 	EnableLog = false
 	MaxConns = 200
-
-[Etherman]
-URL = "http://localhost:8545"
-ForkIDChunkSize = 20000
-MultiGasProvider = false
-	[Etherman.Etherscan]
-		ApiKey = ""
-
-[EthTxManager]
-FrequencyToMonitorTxs = "1s"
-WaitTxToBeMined = "2m"
-L1ConfirmationBlocks = 60
-PrivateKeys = [
-	{Path = "./test/sequencer.keystore", Password = "testonly"},
-	{Path = "/pk/aggregator.keystore", Password = "testonly"}
-]
-ForcedGas = 0
-GasPriceMarginFactor = 1
-MaxGasPriceLimit = 0
-From = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-	[EthTxManager.Etherman]
-	URL = "http://127.0.0.1:8545"
-	MultiGasProvider = false
-	L1ChainID = 1337
 		
 [RPC]
 Host = "0.0.0.0"
@@ -151,13 +127,33 @@ StateConsistencyCheckInterval = "5s"
 		Enabled = false
 
 [SequenceSender]
-WaitPeriodSendSequence = "5s"
-LastBatchVirtualizationTimeMaxWaitPeriod = "5s"
+WaitPeriodSendSequence = "15s"
+LastBatchVirtualizationTimeMaxWaitPeriod = "10s"
 MaxTxSizeForL1 = 131072
-L2Coinbase = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-PrivateKey = {Path = "/pk/sequencer.keystore", Password = "testonly"}
-GasOffset = 80000
-
+L2Coinbase = "0xfa3b44587990f97ba8b6ba7e230a5f0e95d14b3d"
+PrivateKey = {Path = "./test/sequencer.keystore", Password = "testonly"}
+SequencesTxFileName = "sequencesender.json"
+WaitPeriodPurgeTxFile = "15m"
+MaxPendingTx = 1
+	[SequenceSender.StreamClient]
+		Server = "127.0.0.1:6900"
+	[SequenceSender.EthTxManager]
+		FrequencyToMonitorTxs = "1s"
+		WaitTxToBeMined = "2m"
+		L1ConfirmationBlocks = 60
+		PrivateKeys = [
+			{Path = "./test/sequencer.keystore", Password = "testonly"},
+		]
+		ForcedGas = 0
+		GasPriceMarginFactor = 1
+		MaxGasPriceLimit = 0
+		From = "0xfa3b44587990f97ba8b6ba7e230a5f0e95d14b3d"
+		PersistenceFilename = "ethtxmanager.json"
+			[SequenceSender.EthTxManager.Etherman]
+				URL = "http://127.0.0.1:8545"
+				MultiGasProvider = false
+				L1ChainID = 1337
+		
 [Aggregator]
 Host = "0.0.0.0"
 Port = 50081
