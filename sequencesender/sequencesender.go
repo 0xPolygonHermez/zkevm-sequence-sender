@@ -132,11 +132,11 @@ func (s *SequenceSender) Start(ctx context.Context) {
 
 	// Get current nonce
 	var err error
-	s.currentNonce, err = s.etherman.CurrentNonce(ctx, s.cfg.EthTxManager.From)
+	s.currentNonce, err = s.etherman.CurrentNonce(ctx, s.cfg.L2Coinbase)
 	if err != nil {
-		log.Fatalf("[SeqSender] failed to get current nonce from %v, error: %v", s.cfg.EthTxManager.From, err)
+		log.Fatalf("[SeqSender] failed to get current nonce from %v, error: %v", s.cfg.L2Coinbase, err)
 	} else {
-		log.Infof("[SeqSender] Current nonce for %v is %d", s.cfg.EthTxManager.From, s.currentNonce)
+		log.Infof("[SeqSender] current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
 	}
 
 	// Get latest virtual state batch from L1
@@ -169,7 +169,7 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	s.latestSentToL1Batch = s.latestVirtualBatch
 
 	// Start sequence sending
-	go s.sequencing(ctx)
+	go s.sequenceSending(ctx)
 
 	// Start receiving the streaming
 	err = s.streamClient.ExecCommand(datastreamer.CmdStartBookmark)
@@ -178,8 +178,8 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	}
 }
 
-// sequencing
-func (s *SequenceSender) sequencing(ctx context.Context) {
+// sequenceSending starts loop to check if there are sequences to send and sends them if it's convenient
+func (s *SequenceSender) sequenceSending(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.WaitPeriodSendSequence.Duration)
 	for {
 		s.tryToSendSequence(ctx, ticker)
@@ -269,6 +269,11 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 	var txPending uint64
 	for hash, data := range s.ethTransactions {
 		if data.Status == ethtxmanager.MonitoredTxStatusFinalized.String() {
+			// Remove from tx monitor
+			// err := s.ethTxManager.Remove(ctx, hash)
+			// if err != nil {
+			// 	log.Warnf("[SeqSender] error removing tx (%v) from ethtxmanager: %v", hash, err)
+			// }
 			continue
 		}
 
@@ -277,8 +282,8 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 		// Count if it is not in a final state
 		if s.ethTransactions[hash].OnMonitor &&
 			txStatus != ethtxmanager.MonitoredTxStatusFailed.String() &&
-			txStatus != ethtxmanager.MonitoredTxStatusFinalized.String() &&
-			txStatus != ethtxmanager.MonitoredTxStatusMined.String() {
+			txStatus != ethtxmanager.MonitoredTxStatusConsolidated.String() &&
+			txStatus != ethtxmanager.MonitoredTxStatusFinalized.String() {
 			txPending++
 		}
 	}
@@ -298,7 +303,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 	// Get all results
 	results, err := s.ethTxManager.ResultsByStatus(ctx, nil)
 	if err != nil {
-		log.Errorf("[SeqSender] Error getting results for all tx: %v", err)
+		log.Errorf("[SeqSender] error getting results for all tx: %v", err)
 		return err
 	}
 
@@ -394,7 +399,7 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 		// Resend tx?
 		// _ = s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
 	} else if err != nil {
-		log.Errorf("[SeqSender] Error getting result for tx %v: %v", txHash, err)
+		log.Errorf("[SeqSender] error getting result for tx %v: %v", txHash, err)
 		return err
 	} else {
 		s.updateEthTxResult(txData, txResult)
@@ -810,7 +815,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 // closeSequenceBatch closes the current batch
 func (s *SequenceSender) closeSequenceBatch() error {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] Closing batch %d", s.wipBatch)
+	log.Infof("[SeqSender] closing batch %d", s.wipBatch)
 
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
@@ -971,7 +976,7 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 	s.seqSendingStopped = true
 	log.Errorf(template, args...)
-	log.Errorf("[SeqSender] Sequence sending stopped.")
+	log.Errorf("[SeqSender] sequence sending stopped.")
 	for {
 		time.Sleep(1 * time.Second)
 	}

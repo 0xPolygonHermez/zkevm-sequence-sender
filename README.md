@@ -19,34 +19,29 @@ Stateless autonomous binary to sequence L2 batches and send them to L1.
 An example of the content of the JSON persistence file.
 ```
 {
-  "0x602c800c4f7a9c95877ced446f67997f4c3f19940b42a18116976395319e0697": {
-    "nonce": 19,
-    "status": "mined",
-    "sentL1Timestamp": "2024-02-07T10:04:37.628391558+01:00",
-    "statusTimestamp": "2024-02-07T10:04:52.612031307+01:00",
-    "fromBatch": 3,
-    "toBatch": 3,
-    "minedAtBlock": 196,
+  "0x83014454cfd2989e8a82f31fce6f2eff19a3d44886cb36b365ee4d1cd6b159f3": {
+    "nonce": 116,
+    "status": "finalized",
+    "sentL1Timestamp": "2024-02-09T11:09:00.04870821+01:00",
+    "statusTimestamp": "2024-02-09T11:15:29.623881059+01:00",
+    "fromBatch": 483,
+    "toBatch": 483,
+    "minedAtBlock": 5251050,
     "onMonitor": true,
-    "to": "0x8daf17a20c9dba35f005b6324f493785d239719d",
+    "to": "0x31a6ae85297dd0eebd66d7556941c33bd41d565c",
+    "stateHistory": [
+      "2024-02-09T11:09:00.048+01:00, *new, created",
+      "2024-02-09T11:09:14.624+01:00, created, sent",
+      "2024-02-09T11:11:14.629+01:00, sent, mined",
+      "2024-02-09T11:13:14.625+01:00, mined, consolidated",
+      "2024-02-09T11:15:29.623+01:00, consolidated, finalized"
+    ],
     "txs": {
-      "0x46b57b78245c2678d6d03396f6e11db5cfd5ef6147e83d089e62722a19cb86e3": {
-        "revertMessage": ""
+      "0x3876149295d876b09e92900d3fba2986d89c0572f8f7d345fa2ce8f058267282": {
+        "gasPrice": 4426444863
       }
     }
-  },
-  "0xc6bd02700b9456842503bb05a878f6b049b49eb863c77ca47bd526bb4ee53985": {
-    "nonce": 20,
-    "status": "created",
-    "sentL1Timestamp": "2024-02-07T10:05:07.631269379+01:00",
-    "statusTimestamp": "2024-02-07T10:05:07.631286009+01:00",
-    "fromBatch": 4,
-    "toBatch": 4,
-    "minedAtBlock": 0,
-    "onMonitor": true,
-    "to": "0x8daf17a20c9dba35f005b6324f493785d239719d",
-    "txs": {}
-  }
+  }  
 }
 ```
 
