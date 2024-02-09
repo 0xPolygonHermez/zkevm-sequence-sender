@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"runtime"
 
+	ethtxman "github.com/0xPolygonHermez/zkevm-ethtx-manager/etherman"
+	"github.com/0xPolygonHermez/zkevm-ethtx-manager/etherman/etherscan"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/config"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
@@ -29,6 +31,7 @@ func start(cliCtx *cli.Context) error {
 		logVersion()
 	}
 
+	c.SequenceSender.Log = c.Log
 	seqSender := createSequenceSender(*c)
 	go seqSender.Start(cliCtx.Context)
 	waitSignal(nil)
@@ -41,7 +44,19 @@ func setupLog(c log.Config) {
 }
 
 func newEtherman(c config.Config) (*etherman.Client, error) {
-	return etherman.NewClient(c.Etherman, c.NetworkConfig.L1Config)
+	config := etherman.Config{
+		EthermanConfig: ethtxman.Config{
+			URL:              c.SequenceSender.EthTxManager.Etherman.URL,
+			MultiGasProvider: c.SequenceSender.EthTxManager.Etherman.MultiGasProvider,
+			L1ChainID:        c.SequenceSender.EthTxManager.Etherman.L1ChainID,
+			Etherscan: etherscan.Config{
+				ApiKey: c.SequenceSender.EthTxManager.Etherman.Etherscan.ApiKey,
+				Url:    c.SequenceSender.EthTxManager.Etherman.Etherscan.Url,
+			},
+			HTTPHeaders: c.SequenceSender.EthTxManager.Etherman.HTTPHeaders,
+		},
+	}
+	return etherman.NewClient(config, c.NetworkConfig.L1Config)
 }
 
 func createSequenceSender(cfg config.Config) *sequencesender.SequenceSender {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonzkevmglobalexitroot"
 	ethmanTypes "github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -187,9 +185,9 @@ type Client struct {
 // NewClient creates a new etherman.
 func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	// Connect to ethereum node
-	ethClient, err := ethclient.Dial(cfg.URL)
+	ethClient, err := ethclient.Dial(cfg.EthermanConfig.URL)
 	if err != nil {
-		log.Errorf("error connecting to %s: %+v", cfg.URL, err)
+		log.Errorf("error connecting to %s: %+v", cfg.EthermanConfig.URL, err)
 		return nil, err
 	}
 	// Create smc clients
@@ -217,12 +215,12 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	scAddresses = append(scAddresses, l1Config.ZkEVMAddr, l1Config.RollupManagerAddr, l1Config.GlobalExitRootManagerAddr)
 
 	gProviders := []ethereum.GasPricer{ethClient}
-	if cfg.MultiGasProvider {
-		if cfg.Etherscan.ApiKey == "" {
+	if cfg.EthermanConfig.MultiGasProvider {
+		if cfg.EthermanConfig.Etherscan.ApiKey == "" {
 			log.Info("No ApiKey provided for etherscan. Ignoring provider...")
 		} else {
 			log.Info("ApiKey detected for etherscan")
-			gProviders = append(gProviders, etherscan.NewEtherscanService(cfg.Etherscan.ApiKey))
+			gProviders = append(gProviders, etherscan.NewEtherscanService(cfg.EthermanConfig.Etherscan.ApiKey))
 		}
 		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
 	}
@@ -243,7 +241,7 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 		SCAddresses:           scAddresses,
 		RollupID:              rollupID,
 		GasProviders: externalGasProviders{
-			MultiGasProvider: cfg.MultiGasProvider,
+			MultiGasProvider: cfg.EthermanConfig.MultiGasProvider,
 			Providers:        gProviders,
 		},
 		l1Cfg: l1Config,
@@ -268,7 +266,7 @@ func (etherMan *Client) VerifyGenBlockNumber(ctx context.Context, genBlockNumber
 		return false, err
 	}
 	if len(logs) == 0 {
-		return false, fmt.Errorf("the specified genBlockNumber in config file does not contain any forkID event. Please use the proper blockNumber.")
+		return false, fmt.Errorf("the specified genBlockNumber in config file does not contain any forkID event. Please use the proper blockNumber")
 	}
 	var zkevmVersion oldpolygonzkevm.OldpolygonzkevmUpdateZkEVMVersion
 	switch logs[0].Topics[0] {
@@ -297,120 +295,9 @@ func (etherMan *Client) VerifyGenBlockNumber(ctx context.Context, genBlockNumber
 		zkevmVersion.NumBatch = 0
 	}
 	if zkevmVersion.NumBatch != 0 {
-		return false, fmt.Errorf("the specified genBlockNumber in config file does not contain the initial forkID event (BatchNum: %d). Please use the proper blockNumber.", zkevmVersion.NumBatch)
+		return false, fmt.Errorf("the specified genBlockNumber in config file does not contain the initial forkID event (BatchNum: %d). Please use the proper blockNumber", zkevmVersion.NumBatch)
 	}
 	return true, nil
-}
-
-// GetForks returns fork information
-func (etherMan *Client) GetForks(ctx context.Context, genBlockNumber uint64, lastL1BlockSynced uint64) ([]state.ForkIDInterval, error) {
-	log.Debug("Getting forkIDs from blockNumber: ", genBlockNumber)
-	var logs []types.Log
-	log.Debug("Using ForkIDChunkSize: ", etherMan.cfg.ForkIDChunkSize)
-	for i := genBlockNumber; i <= lastL1BlockSynced; i = i + etherMan.cfg.ForkIDChunkSize + 1 {
-		final := i + etherMan.cfg.ForkIDChunkSize
-		if final > lastL1BlockSynced {
-			// Limit the query to the last l1BlockSynced
-			final = lastL1BlockSynced
-		}
-		log.Debug("INTERVAL. Initial: ", i, ". Final: ", final)
-		// Filter query
-		query := ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(i),
-			ToBlock:   new(big.Int).SetUint64(final),
-			Addresses: etherMan.SCAddresses,
-			Topics:    [][]common.Hash{{updateZkEVMVersionSignatureHash, updateRollupSignatureHash, addExistingRollupSignatureHash, createNewRollupSignatureHash}},
-		}
-		l, err := etherMan.EthClient.FilterLogs(ctx, query)
-		if err != nil {
-			return []state.ForkIDInterval{}, err
-		}
-		logs = append(logs, l...)
-	}
-
-	var forks []state.ForkIDInterval
-	for i, l := range logs {
-		var zkevmVersion oldpolygonzkevm.OldpolygonzkevmUpdateZkEVMVersion
-		switch l.Topics[0] {
-		case updateZkEVMVersionSignatureHash:
-			log.Debug("updateZkEVMVersion Event received")
-			zkevmV, err := etherMan.OldZkEVM.ParseUpdateZkEVMVersion(l)
-			if err != nil {
-				return []state.ForkIDInterval{}, err
-			}
-			if zkevmV != nil {
-				zkevmVersion = *zkevmV
-			}
-		case updateRollupSignatureHash:
-			log.Debug("updateRollup Event received")
-			updateRollupEvent, err := etherMan.RollupManager.ParseUpdateRollup(l)
-			if err != nil {
-				return []state.ForkIDInterval{}, err
-			}
-			if etherMan.RollupID != updateRollupEvent.RollupID {
-				continue
-			}
-			// Query to get the forkID
-			rollupType, err := etherMan.RollupManager.RollupTypeMap(&bind.CallOpts{Pending: false}, updateRollupEvent.NewRollupTypeID)
-			if err != nil {
-				return []state.ForkIDInterval{}, err
-			}
-			zkevmVersion.ForkID = rollupType.ForkID
-			zkevmVersion.NumBatch = updateRollupEvent.LastVerifiedBatchBeforeUpgrade
-
-		case addExistingRollupSignatureHash:
-			log.Debug("addExistingRollup Event received")
-			addExistingRollupEvent, err := etherMan.RollupManager.ParseAddExistingRollup(l)
-			if err != nil {
-				return []state.ForkIDInterval{}, err
-			}
-			if etherMan.RollupID != addExistingRollupEvent.RollupID {
-				continue
-			}
-			zkevmVersion.ForkID = addExistingRollupEvent.ForkID
-			zkevmVersion.NumBatch = addExistingRollupEvent.LastVerifiedBatchBeforeUpgrade
-
-		case createNewRollupSignatureHash:
-			log.Debug("createNewRollup Event received")
-			createNewRollupEvent, err := etherMan.RollupManager.ParseCreateNewRollup(l)
-			if err != nil {
-				return []state.ForkIDInterval{}, err
-			}
-			if etherMan.RollupID != createNewRollupEvent.RollupID {
-				continue
-			}
-			// Query to get the forkID
-			rollupType, err := etherMan.RollupManager.RollupTypeMap(&bind.CallOpts{Pending: false}, createNewRollupEvent.RollupTypeID)
-			if err != nil {
-				log.Error(err)
-				return []state.ForkIDInterval{}, err
-			}
-			zkevmVersion.ForkID = rollupType.ForkID
-			zkevmVersion.NumBatch = 0
-		}
-		var fork state.ForkIDInterval
-		if i == 0 {
-			fork = state.ForkIDInterval{
-				FromBatchNumber: zkevmVersion.NumBatch + 1,
-				ToBatchNumber:   math.MaxUint64,
-				ForkId:          zkevmVersion.ForkID,
-				Version:         zkevmVersion.Version,
-				BlockNumber:     l.BlockNumber,
-			}
-		} else {
-			forks[len(forks)-1].ToBatchNumber = zkevmVersion.NumBatch
-			fork = state.ForkIDInterval{
-				FromBatchNumber: zkevmVersion.NumBatch + 1,
-				ToBatchNumber:   math.MaxUint64,
-				ForkId:          zkevmVersion.ForkID,
-				Version:         zkevmVersion.Version,
-				BlockNumber:     l.BlockNumber,
-			}
-		}
-		forks = append(forks, fork)
-	}
-	log.Debugf("ForkIDs found: %+v", forks)
-	return forks, nil
 }
 
 // GetRollupInfoByBlockRange function retrieves the Rollup information that are included in all this ethereum blocks
@@ -1566,7 +1453,7 @@ func (etherMan *Client) GetL2ChainID() (uint64, error) {
 			log.Debug("error from rollupManager: ", err)
 			return 0, err
 		} else if rollupData.ChainID == 0 {
-			return rollupData.ChainID, fmt.Errorf("error: chainID received is 0!!")
+			return rollupData.ChainID, fmt.Errorf("error: chainID received is 0")
 		}
 		return rollupData.ChainID, nil
 	}
