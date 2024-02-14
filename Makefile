@@ -67,7 +67,6 @@ build: check-go
 lint: check-go
 build-docker: check-docker
 build-docker-nc: check-docker
-run-rpc: check-docker check-docker-compose
 stop: check-docker check-docker-compose
 install-linter: check-go check-curl
 install-config-doc-gen: check-python
@@ -81,22 +80,12 @@ build: ## Builds the binary locally into ./dist
 	$(GOENVVARS) go build -ldflags "all=$(LDFLAGS)" -o $(GOBIN)/$(GOBINARY) $(GOCMD)
 
 .PHONY: build-docker
-build-docker: ## Builds a docker image with the node binary
-	docker build -t zkevm-node -f ./Dockerfile .
+build-docker: ## Builds a docker image with the sequence sender binary
+	docker build -t zkevm-seqsender -f ./Dockerfile .
 
 .PHONY: build-docker-nc
-build-docker-nc: ## Builds a docker image with the node binary - but without build cache
-	docker build --no-cache=true -t zkevm-node -f ./Dockerfile .
-
-.PHONY: run-rpc
-run-rpc: ## Runs all the services needed to run a local zkEVM RPC node
-	docker-compose up -d zkevm-state-db zkevm-pool-db
-	sleep 2
-	docker-compose up -d zkevm-prover
-	sleep 5
-	docker-compose up -d zkevm-sync
-	sleep 2
-	docker-compose up -d zkevm-rpc
+build-docker-nc: ## Builds a docker image with the sequence sender binary - but without build cache
+	docker build --no-cache=true -t zkevm-seqsender -f ./Dockerfile .
 
 .PHONY: stop
 stop: ## Stops all services
