@@ -26,6 +26,7 @@ MaxPendingTx = 1
 		WaitTxToBeMined = "2m"
 		ConsolidationL1ConfirmationBlocks = 30
 		FinalizationL1ConfirmationBlocks = 60
+		WaitReceiptToBeGenerated = "8s"
 		PrivateKeys = [
 			{Path = "./test/sequencer.keystore", Password = "testonly"},
 		]
