@@ -24,9 +24,7 @@ import (
 )
 
 var (
-	// ErrOversizedData is returned if the input data of a transaction is greater
-	// than some meaningful limit a user might use. This is not a consensus error
-	// making the transaction invalid, rather a DOS protection.
+	// ErrOversizedData when transaction input data is greater than a limit (DOS protection)
 	ErrOversizedData = errors.New("oversized data")
 )
 
@@ -318,7 +316,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 		txSequence, exists := s.ethTransactions[result.ID]
 		if !exists {
 			log.Infof("[SeqSender] transaction %v missing in memory structure. Adding it", result.ID)
-			// TODO: missing from/to batch and sent timestamp info
+			// No info: from/to batch and the sent timestamp
 			s.ethTransactions[result.ID] = &ethTxData{
 				SentL1Timestamp: time.Time{},
 				StatusTimestamp: time.Now(),
@@ -371,9 +369,10 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 		txData.StateHistory = append(txData.StateHistory, stTrans)
 
 		// Manage according to the state
+		statusConsolidated := txData.Status == ethtxmanager.MonitoredTxStatusConsolidated.String() || txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String()
 		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
 			s.logFatalf("[SeqSender] transaction %v result failed!")
-		} else if txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String() && txData.ToBatch >= s.latestVirtualBatch {
+		} else if statusConsolidated && txData.ToBatch >= s.latestVirtualBatch {
 			s.latestVirtualTime = txData.StatusTimestamp
 		}
 	}
@@ -394,7 +393,7 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 	txData, exists := s.ethTransactions[txHash]
 	if !exists {
 		log.Errorf("[SeqSender] transaction %v not found in memory", txHash)
-		return errors.New("transaction not found in memory")
+		return errors.New("transaction not found in memory structure")
 	}
 
 	txResult, err := s.ethTxManager.Result(ctx, txHash)
@@ -494,7 +493,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	} else {
 		if txOldHash == nil {
 			log.Errorf("[SeqSender] trying to resend a tx with nil hash")
-			return errors.New("resend tx nil hash")
+			return errors.New("resend tx with nil hash monitor id")
 		}
 		paramTo = &s.ethTransactions[*txOldHash].To
 		paramNonce = &s.ethTransactions[*txOldHash].Nonce
@@ -633,14 +632,6 @@ func (s *SequenceSender) handleEstimateGasSendSequenceErr(ctx context.Context, s
 		return sequences, nil
 	}
 
-	// Unknown error
-	if len(sequences) == 1 {
-		// TODO: gracefully handle this situation by creating an L2 reorg
-		log.Errorf(
-			"Error when estimating gas for BatchNum %d (alone in the sequences): %v",
-			currentBatchNumToSequence, err,
-		)
-	}
 	// Remove the latest item and send the sequences
 	log.Infof(
 		"Done building sequences, selected batches to %d. Batch %d excluded due to unknown error: %v",
@@ -651,6 +642,7 @@ func (s *SequenceSender) handleEstimateGasSendSequenceErr(ctx context.Context, s
 	return sequences, nil
 }
 
+// isDataForEthTxTooBig checks if tx oversize error
 func isDataForEthTxTooBig(err error) bool {
 	return errors.Is(err, etherman.ErrGasRequiredExceedsAllowance) ||
 		errors.Is(err, ErrOversizedData) ||
@@ -714,15 +706,6 @@ func (s *SequenceSender) saveSentSequencesTransactions(ctx context.Context) erro
 		return err
 	}
 
-	// Delete the old file
-	if _, err := os.Stat(s.cfg.SequencesTxFileName); err == nil {
-		err = os.Remove(s.cfg.SequencesTxFileName)
-		if err != nil {
-			log.Errorf("[SeqSender] error deleting file %s: %v", s.cfg.SequencesTxFileName, err)
-			return err
-		}
-	}
-
 	// Rename the new file
 	err = os.Rename(fileName, s.cfg.SequencesTxFileName)
 	if err != nil {
@@ -770,7 +753,6 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 			// Create new sequential batch
 			s.addNewSequenceBatch(l2BlockStart)
 		}
-		// TODO: what to do if new batch is smaller than the current one
 
 		// Add L2 block
 		s.addNewBatchL2Block(l2BlockStart)
@@ -906,7 +888,7 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 // addNewBlockTx adds a new Tx to the current L2 block
 func (s *SequenceSender) addNewBlockTx(l2Tx state.DSL2Transaction) {
 	s.mutexSequence.Lock()
-	log.Infof("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:8])
+	log.Debugf("[SeqSender] ........new tx, length %d EGP %d SR %x..", l2Tx.EncodedLength, l2Tx.EffectiveGasPricePercentage, l2Tx.StateRoot[:8])
 
 	// Current L2 block
 	_, blockRaw := s.getWipL2Block()
@@ -971,40 +953,10 @@ func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 	}
 }
 
-// printBatchSequences prints the current batches sequence (or just a selected batch) in the memory structure
-// func (s *SequenceSender) printBatchSequences(selectBatch uint64, showBlock bool, showTx bool) {
-// 	for i := 0; i < len(s.sequenceList); i++ {
-// 		// Batch info
-// 		batchNumber := s.sequenceList[i]
-// 		if selectBatch == 0 || selectBatch == batchNumber {
-// 			seq := s.sequenceData[batchNumber]
-
-// 			var raw *state.BatchRawV2
-// 			if seq != nil {
-// 				raw = seq.batchRaw
-// 			} else {
-// 				log.Debugf("[SeqSender] // batch number %d not found in the map!", batchNumber)
-// 				continue
-// 			}
-
-// 			log.Debugf("[SeqSender] // seq %d: batch %d (closed? %t, GER: %x..)", i, batchNumber, seq.batchClosed, seq.batch.GlobalExitRoot[:8])
-// 			printBatch(raw, showBlock, showTx)
-// 		}
-// 	}
-// }
-
-// printEthTxs prints the current L1 transactions in the memory structure
-// func (s *SequenceSender) printEthTxs() {
-// 	for hash, data := range s.ethTransactions {
-// 		log.Debugf("[SeqSender] // tx hash %x.. (sent: %d, update: %d, status: %s, fromBatch: %d, toBatch: %d) hash %x",
-// 			hash[:4], data.SentL1Timestamp, data.StatusTimestamp, data.Status, data.FromBatch, data.ToBatch, hash)
-// 	}
-// }
-
 // printSequences prints data from slice of type sequences
 func printSequences(sequences []types.Sequence) {
 	for i, seq := range sequences {
-		log.Infof("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
+		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
 	}
 }
 

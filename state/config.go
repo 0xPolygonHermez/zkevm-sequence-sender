@@ -2,7 +2,6 @@ package state
 
 import (
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/config/types"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/db"
 )
 
 // Config is state config
@@ -27,9 +26,6 @@ type Config struct {
 
 	// New fork id to be used for batches greaters than ForkUpgradeBatchNumber (fork upgrade)
 	ForkUpgradeNewForkId uint64
-
-	// DB is the database configuration
-	DB db.Config `mapstructure:"DB"`
 
 	// Configuration for the batch constraints
 	Batch BatchConfig `mapstructure:"Batch"`
