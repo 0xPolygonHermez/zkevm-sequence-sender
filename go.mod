@@ -6,7 +6,7 @@ require (
 	github.com/0xPolygonHermez/zkevm-data-streamer v0.1.18
 	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
 	github.com/ethereum/go-ethereum v1.13.11
-	github.com/gobuffalo/packr/v2 v2.8.3
+	github.com/gobuffalo/packr/v2 v2.8.3 // indirect
 	github.com/google/uuid v1.5.0
 	github.com/hermeznetwork/tracerr v0.3.2
 	github.com/iden3/go-iden3-crypto v0.0.15
@@ -16,7 +16,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/prometheus/common v0.45.0
-	github.com/rubenv/sql-migrate v1.6.1
+	github.com/rubenv/sql-migrate v1.6.1 // indirect
 	github.com/spf13/afero v1.11.0
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.8.4
