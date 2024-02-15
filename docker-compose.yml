@@ -1,14 +1,12 @@
 version: "3.5"
 
 services:
-  sequence-sender:
-    container_name: sequence-sender
+  zkevm-seqsender:
+    container_name: zkevm-seqsender
     restart: unless-stopped
-    image: sequence-sender
-    ports: 
+    image: zkevm-seqsender
     volumes:
-      - ./dist:/app
-      - ./config/environments/${SEQSENDER_NETWORK}/config.toml:/app/config.toml
+      - ./config/environments/${ZKEVM_NETWORK}/app.config.toml:/app/config.toml
     command: 
       - "/bin/sh"
       - "-c"
