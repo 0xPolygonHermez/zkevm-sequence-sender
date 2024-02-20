@@ -591,7 +591,7 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 			if sequences != nil {
 				if len(sequences) > 0 {
 					// Handling the error gracefully, re-processing the sequence as a sanity check
-					lastSequence := sequences[len(sequences)-1]
+					lastSequence = sequences[len(sequences)-1]
 					_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
 					return sequences, err
 				}
