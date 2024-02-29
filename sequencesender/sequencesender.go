@@ -17,6 +17,7 @@ import (
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
 	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonzkevm"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
@@ -136,6 +137,20 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	} else {
 		log.Infof("[SeqSender] current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
 	}
+
+	// TEST BLOB
+	blobs := []string{"0x1111111111111111", "0x2222222222222222", "0x3333333333333333", "0x4444444444444444"}
+
+	a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
+	if err != nil {
+		log.Error("error getting abi. Error: ", err)
+	}
+	input, err := a.Pack("pol")
+	if err != nil {
+		log.Error("error packing call. Error: ", err)
+	}
+	_ = s.createSendBlobTx(ctx, 4, 50, 30, 500000, 0, input, blobs) // nolint:gomnd
+	log.Fatalf("END")
 
 	// Get latest virtual state batch from L1
 	err = s.updateLatestVirtualBatch()
