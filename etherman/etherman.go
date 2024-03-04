@@ -29,7 +29,9 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 	"golang.org/x/crypto/sha3"
 )
@@ -716,23 +718,40 @@ func (etherMan *Client) WaitTxToBeMined(ctx context.Context, tx *types.Transacti
 }
 
 // EstimateGasSequenceBatches estimates gas for sending batches
-func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
+func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address, useBlobs bool) (*types.Transaction, error) {
 	opts, err := etherMan.getAuthByAddress(sender)
 	if err == ErrNotFound {
 		return nil, ErrPrivateKeyNotFound
 	}
 	opts.NoSend = true
 
-	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
-	if err != nil {
-		return nil, err
+	var tx *types.Transaction
+	if !useBlobs {
+		tx, err = etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var blobBytes []byte
+		for _, seq := range sequences {
+			blobBytes = append(blobBytes, seq.BatchL2Data...)
+		}
+
+		blob, err := encodeBlobData(blobBytes)
+		if err != nil {
+			return nil, err
+		}
+		sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
+		tx = types.NewTx(&types.BlobTx{
+			Sidecar: sidecar,
+		})
 	}
 
 	return tx, nil
 }
 
 // BuildSequenceBatchesTxData builds a []bytes to be sent to the PoE SC method SequenceBatches.
-func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error) {
+func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error) {
 	opts, err := etherMan.getAuthByAddress(sender)
 	if err == ErrNotFound {
 		return nil, nil, fmt.Errorf("failed to build sequence batches, err: %w", ErrPrivateKeyNotFound)
@@ -743,7 +762,7 @@ func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequen
 	opts.GasLimit = uint64(1)
 	opts.GasPrice = big.NewInt(1)
 
-	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
+	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -751,7 +770,7 @@ func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequen
 	return tx.To(), tx.Data(), nil
 }
 
-func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
+func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
 	var batches []polygonzkevm.PolygonRollupBaseEtrogBatchData
 	for _, seq := range sequences {
 		var ger common.Hash
@@ -768,7 +787,7 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 		batches = append(batches, batch)
 	}
 
-	tx, err := etherMan.ZkEVM.SequenceBatches(&opts, batches, l2Coinbase)
+	tx, err := etherMan.ZkEVM.SequenceBatches(&opts, batches, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 	if err != nil {
 		log.Debugf("Batches to send: %+v", batches)
 		log.Debug("l2CoinBase: ", l2Coinbase)
@@ -777,7 +796,7 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 		if err2 != nil {
 			log.Error("error getting abi. Error: ", err2)
 		}
-		input, err3 := a.Pack("sequenceBatches", batches, l2Coinbase)
+		input, err3 := a.Pack("sequenceBatches", batches, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 		if err3 != nil {
 			log.Error("error packing call. Error: ", err3)
 		}
@@ -1349,12 +1368,6 @@ func (etherMan *Client) EthBlockByNumber(ctx context.Context, blockNumber uint64
 	return block, nil
 }
 
-// GetGapLastBatchTimestamp function allows to retrieve the gaplastTimestamp value in the smc
-// TODO: If nobody uses this function delete
-func (etherMan *Client) GetGapLastBatchTimestamp() (uint64, error) {
-	return etherMan.ZkEVM.GapLastTimestamp(&bind.CallOpts{Pending: false})
-}
-
 // GetLatestBatchNumber function allows to retrieve the latest proposed batch in the smc
 func (etherMan *Client) GetLatestBatchNumber() (uint64, error) {
 	rollupData, err := etherMan.RollupManager.RollupIDToRollupData(&bind.CallOpts{Pending: false}, etherMan.RollupID)
@@ -1629,3 +1642,48 @@ func (etherMan *Client) getAuthByAddress(addr common.Address) (bind.TransactOpts
 
 // 	return *auth, nil
 // }
+
+func encodeBlobData(data []byte) (kzg4844.Blob, error) {
+	dataLen := len(data)
+	if dataLen > params.BlobTxFieldElementsPerBlob*(params.BlobTxBytesPerFieldElement-1) {
+		log.Infof("blob data longer than allowed (length: %v, limit: %v)", dataLen, params.BlobTxFieldElementsPerBlob*(params.BlobTxBytesPerFieldElement-1))
+		return kzg4844.Blob{}, errors.New("blob data longer than allowed")
+	}
+
+	// 1 Blob = 4096 Field elements x 32 bytes/field element = 128 KB
+	elemSize := params.BlobTxBytesPerFieldElement
+
+	blob := kzg4844.Blob{}
+	fieldIndex := -1
+	for i := 0; i < len(data); i += (elemSize - 1) {
+		fieldIndex++
+		if fieldIndex == params.BlobTxFieldElementsPerBlob {
+			break
+		}
+		max := i + (elemSize - 1)
+		if max > len(data) {
+			max = len(data)
+		}
+		copy(blob[fieldIndex*elemSize+1:], data[i:max])
+	}
+	return blob, nil
+}
+
+func makeBlobSidecar(blobs []kzg4844.Blob) *types.BlobTxSidecar {
+	var commitments []kzg4844.Commitment
+	var proofs []kzg4844.Proof
+
+	for _, blob := range blobs {
+		c, _ := kzg4844.BlobToCommitment(blob)
+		p, _ := kzg4844.ComputeBlobProof(blob, c)
+
+		commitments = append(commitments, c)
+		proofs = append(proofs, p)
+	}
+
+	return &types.BlobTxSidecar{
+		Blobs:       blobs,
+		Commitments: commitments,
+		Proofs:      proofs,
+	}
+}
