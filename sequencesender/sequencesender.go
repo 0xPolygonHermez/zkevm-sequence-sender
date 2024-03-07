@@ -17,7 +17,6 @@ import (
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
 	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonzkevm"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
@@ -27,6 +26,10 @@ import (
 var (
 	// ErrOversizedData when transaction input data is greater than a limit (DOS protection)
 	ErrOversizedData = errors.New("oversized data")
+)
+
+const (
+	sendUsingBlobs = false
 )
 
 // SequenceSender represents a sequence sender
@@ -137,20 +140,6 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	} else {
 		log.Infof("[SeqSender] current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
 	}
-
-	// TEST BLOB
-	blobs := []string{"0x1111111111111111", "0x2222222222222222", "0x3333333333333333", "0x4444444444444444"}
-
-	a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
-	if err != nil {
-		log.Error("error getting abi. Error: ", err)
-	}
-	input, err := a.Pack("pol")
-	if err != nil {
-		log.Error("error packing call. Error: ", err)
-	}
-	_ = s.createSendBlobTx(ctx, 4, 50, 30, 500000, 0, input, blobs) // nolint:gomnd
-	log.Fatalf("END")
 
 	// Get latest virtual state batch from L1
 	err = s.updateLatestVirtualBatch()
@@ -457,7 +446,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 
 	// Check if should send sequence to L1
 	log.Infof("[SeqSender] getting sequences to send")
-	sequences, err := s.getSequencesToSend(ctx)
+	sequences, err := s.getSequencesToSend()
 	if err != nil || len(sequences) == 0 {
 		if err != nil {
 			log.Errorf("[SeqSender] error getting sequences: %v", err)
@@ -473,7 +462,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	printSequences(sequences)
 
 	// Build sequence data
-	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase, sendUsingBlobs)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
 		return
@@ -563,7 +552,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 }
 
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
-func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequence, error) {
+func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
 	// Add sequences until too big for a single L1 tx or last batch is reached
 	s.mutexSequence.Lock()
 	defer s.mutexSequence.Unlock()
@@ -594,24 +583,27 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 
 		// Check if can be send
 		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+		if sendUsingBlobs {
 
-		if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
-			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
-			err = ErrOversizedData
-		}
-
-		if err != nil {
-			log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
-			sequences, err = s.handleEstimateGasSendSequenceErr(ctx, sequences, batchNumber, err)
-			if sequences != nil {
-				if len(sequences) > 0 {
-					// Handling the error gracefully, re-processing the sequence as a sanity check
-					lastSequence = sequences[len(sequences)-1]
-					_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-					return sequences, err
-				}
+		} else {
+			if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
+				log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
+				err = ErrOversizedData
 			}
-			return sequences, err
+
+			if err != nil {
+				log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
+				sequences, err = s.handleEstimateGasSendSequenceErr(sequences, batchNumber, err)
+				if sequences != nil {
+					if len(sequences) > 0 {
+						// Handling the error gracefully, re-processing the sequence as a sanity check
+						lastSequence = sequences[len(sequences)-1]
+						_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+						return sequences, err
+					}
+				}
+				return sequences, err
+			}
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
@@ -637,7 +629,7 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 }
 
 // handleEstimateGasSendSequenceErr handles an error on the estimate gas. Results: (nil,nil)=requires waiting, (nil,error)=no handled gracefully, (seq,nil) handled gracefully
-func (s *SequenceSender) handleEstimateGasSendSequenceErr(ctx context.Context, sequences []types.Sequence, currentBatchNumToSequence uint64, err error) ([]types.Sequence, error) {
+func (s *SequenceSender) handleEstimateGasSendSequenceErr(sequences []types.Sequence, currentBatchNumToSequence uint64, err error) ([]types.Sequence, error) {
 	// Insufficient allowance
 	if errors.Is(err, etherman.ErrInsufficientAllowance) {
 		return nil, err

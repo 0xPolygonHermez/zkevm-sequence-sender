@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -33,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -138,6 +140,7 @@ type ethereumClient interface {
 	ethereum.ContractCaller
 	ethereum.GasEstimator
 	ethereum.GasPricer
+	ethereum.GasPricer1559
 	ethereum.LogFilterer
 	ethereum.TransactionReader
 	ethereum.TransactionSender
@@ -718,40 +721,65 @@ func (etherMan *Client) WaitTxToBeMined(ctx context.Context, tx *types.Transacti
 }
 
 // EstimateGasSequenceBatches estimates gas for sending batches
-func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address, useBlobs bool) (*types.Transaction, error) {
+func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
+	const GWEI_DIV = 1000000000
+
 	opts, err := etherMan.getAuthByAddress(sender)
 	if err == ErrNotFound {
 		return nil, ErrPrivateKeyNotFound
 	}
 	opts.NoSend = true
 
-	var tx *types.Transaction
-	if !useBlobs {
-		tx, err = etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var blobBytes []byte
-		for _, seq := range sequences {
-			blobBytes = append(blobBytes, seq.BatchL2Data...)
-		}
-
-		blob, err := encodeBlobData(blobBytes)
-		if err != nil {
-			return nil, err
-		}
-		sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
-		tx = types.NewTx(&types.BlobTx{
-			Sidecar: sidecar,
-		})
+	// Cost using calldata
+	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
+	if err != nil {
+		return nil, err
 	}
+
+	estimateDataCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas())).Uint64()
+	log.Infof(">> tx DATA cost: %d gas x %d gasPrice = %d Gwei", tx.Gas(), tx.GasPrice().Uint64(), estimateDataCost/GWEI_DIV)
+
+	// Construct blob data
+	var blobBytes []byte
+	for _, seq := range sequences {
+		blobBytes = append(blobBytes, seq.BatchL2Data...)
+	}
+	blob, err := encodeBlobData(blobBytes)
+	if err != nil {
+		return nil, err
+	}
+	sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
+	blobHashes := sidecar.BlobHashes()
+
+	// Max Gas
+	parentHeader, err := etherMan.EthClient.HeaderByNumber(context.Background(), nil)
+	if err != nil {
+		log.Errorf("failed to get header from previous block: %v", err)
+		return nil, err
+	}
+	parentExcessBlobGas := eip4844.CalcExcessBlobGas(*parentHeader.ExcessBlobGas, *parentHeader.BlobGasUsed)
+	blobFeeCap := eip4844.CalcBlobFee(parentExcessBlobGas)
+	log.Infof("excessBlobGas[%d], blobFeeCap[%d]", parentExcessBlobGas, blobFeeCap)
+
+	// Transaction
+	blobTx := types.NewTx(&types.BlobTx{
+		ChainID:    uint256.MustFromBig(tx.ChainId()),
+		GasTipCap:  uint256.MustFromBig(tx.GasTipCap()),
+		GasFeeCap:  uint256.MustFromBig(tx.GasFeeCap()),
+		To:         *tx.To(),
+		BlobFeeCap: uint256.MustFromBig(blobFeeCap),
+		BlobHashes: blobHashes,
+		Sidecar:    sidecar,
+	})
+
+	estimateBlobCost := new(big.Int).Mul(blobFeeCap, new(big.Int).SetUint64(blobTx.BlobGas())).Uint64()
+	log.Infof(">> tx BLOB cost: %d blobGas x %d blobGasPrice = %d Gwei", blobTx.BlobGas(), blobFeeCap.Uint64(), estimateBlobCost/GWEI_DIV)
 
 	return tx, nil
 }
 
 // BuildSequenceBatchesTxData builds a []bytes to be sent to the PoE SC method SequenceBatches.
-func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error) {
+func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address, useBlobs bool) (to *common.Address, data []byte, err error) {
 	opts, err := etherMan.getAuthByAddress(sender)
 	if err == ErrNotFound {
 		return nil, nil, fmt.Errorf("failed to build sequence batches, err: %w", ErrPrivateKeyNotFound)
@@ -762,9 +790,109 @@ func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequen
 	opts.GasLimit = uint64(1)
 	opts.GasPrice = big.NewInt(1)
 
-	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	var tx *types.Transaction
+	tx, err = etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 	if err != nil {
 		return nil, nil, err
+	}
+	if useBlobs {
+		// Construct non-blob fields
+		// a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
+		// if err != nil {
+		// 	log.Error("failed to get abi: %v", err)
+		// }
+		// input, err := a.Pack("pol")
+		// if err != nil {
+		// 	log.Error("failed packing call: %v", err)
+		// }
+
+		toAddress := common.HexToAddress(etherMan.SCAddresses[0].Hex())
+		fromAddress := opts.From
+		chainID := big.NewInt(int64(etherMan.cfg.EthermanConfig.L1ChainID))
+
+		nonce, err := etherMan.CurrentNonce(context.Background(), fromAddress)
+		if err != nil {
+			log.Errorf("failed to get current nonce: %v", err)
+			return nil, nil, err
+		}
+
+		gasTipCap, err := etherMan.EthClient.SuggestGasTipCap(context.Background())
+		if err != nil {
+			log.Errorf("failed to get suggest gas tip cap: %v", err)
+			return nil, nil, err
+		}
+
+		gasFeeCap, err := etherMan.EthClient.SuggestGasPrice(context.Background())
+		if err != nil {
+			log.Errorf("failed to get suggest gas price: %v", err)
+			return nil, nil, err
+		}
+
+		gasLimit, err := etherMan.EthClient.EstimateGas(context.Background(),
+			ethereum.CallMsg{
+				From:      fromAddress,
+				To:        &toAddress,
+				GasFeeCap: gasFeeCap,
+				GasTipCap: gasTipCap,
+				Value:     big.NewInt(0),
+			})
+		if err != nil {
+			log.Errorf("failed to estimate gas: %v", err)
+			return nil, nil, err
+		}
+
+		// Estimate blob fee cap
+		parentHeader, err := etherMan.EthClient.HeaderByNumber(context.Background(), nil)
+		if err != nil {
+			log.Errorf("failed to get header from previous block: %v", err)
+			return nil, nil, err
+		}
+		parentExcessBlobGas := eip4844.CalcExcessBlobGas(*parentHeader.ExcessBlobGas, *parentHeader.BlobGasUsed)
+		blobFeeCap := eip4844.CalcBlobFee(parentExcessBlobGas)
+		log.Infof("blob gas: excessBlobGas[%d], blobFeeCap[%d]", parentExcessBlobGas, blobFeeCap)
+
+		// Construct blob data
+		var blobBytes []byte
+		for _, seq := range sequences {
+			blobBytes = append(blobBytes, seq.BatchL2Data...)
+		}
+
+		blob, err := encodeBlobData(blobBytes)
+		if err != nil {
+			return nil, nil, err
+		}
+		sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
+		blobHashes := sidecar.BlobHashes()
+		// Transaction
+		tx = types.NewTx(&types.BlobTx{
+			ChainID:    uint256.MustFromBig(chainID),
+			Nonce:      nonce,
+			GasTipCap:  uint256.MustFromBig(gasTipCap),
+			GasFeeCap:  uint256.MustFromBig(gasFeeCap),
+			Gas:        gasLimit * 12 / 10, // nolint:gomnd
+			To:         toAddress,
+			BlobFeeCap: uint256.MustFromBig(blobFeeCap),
+			BlobHashes: blobHashes,
+			Sidecar:    sidecar,
+		})
+
+		// Sign the transaction
+		if opts.Signer == nil {
+			log.Errorf("no signer to authorize the transaction with")
+			return nil, nil, errors.New("no signer to authorize the transaction with")
+		}
+		signedTx, err := opts.Signer(opts.From, tx)
+		if err != nil {
+			log.Errorf("failed to sign transaction: %v", err)
+			return nil, nil, err
+		}
+
+		// Send transaction
+		err = etherMan.EthClient.SendTransaction(context.Background(), signedTx)
+		if err != nil {
+			log.Errorf("failed to send transaction: %v", err)
+			return nil, nil, err
+		}
 	}
 
 	return tx.To(), tx.Data(), nil
