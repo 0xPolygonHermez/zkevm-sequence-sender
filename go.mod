@@ -3,7 +3,7 @@ module github.com/0xPolygonHermez/zkevm-sequence-sender
 go 1.21
 
 require (
-	github.com/0xPolygonHermez/zkevm-data-streamer v0.1.18
+	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.0
 	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
 	github.com/ethereum/go-ethereum v1.13.11
 	github.com/google/uuid v1.5.0

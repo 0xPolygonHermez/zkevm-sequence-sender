@@ -1,6 +1,6 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-github.com/0xPolygonHermez/zkevm-data-streamer v0.1.18 h1:InqeTcHrNbfj1OUfn2aFplFay7ibd7KhYqvmMZYZfn0=
-github.com/0xPolygonHermez/zkevm-data-streamer v0.1.18/go.mod h1:0QkAXcFa92mFJrCbN3UPUJGJYes851yEgYHLONnaosE=
+github.com/0xPolygonHermez/zkevm-data-streamer v0.2.0 h1:W4s0ICVQ2477quI0trjvPTae3kNgkPXINyG4NOBR6VQ=
+github.com/0xPolygonHermez/zkevm-data-streamer v0.2.0/go.mod h1:0QkAXcFa92mFJrCbN3UPUJGJYes851yEgYHLONnaosE=
 github.com/0xPolygonHermez/zkevm-ethtx-manager v0.0.11 h1:ttKUbVJMu9sK1+WkT3uhvBpdWSVDWJXYvDQ1/ghth0A=
 github.com/0xPolygonHermez/zkevm-ethtx-manager v0.0.11/go.mod h1:kNZ2zSPZpQd2B5Zcz3Vpe71ML9dEVhPuY1ljvNUaudA=
 github.com/0xPolygonHermez/zkevm-node v0.5.0 h1:qoqBQ5dBUcJqH98/+iZpZXwpIg73AnVs4EsGikxAj7o=
