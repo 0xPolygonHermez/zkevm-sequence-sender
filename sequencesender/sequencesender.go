@@ -458,7 +458,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	printSequences(sequences)
 
 	// Build sequence data
-	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
+	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
 		return
@@ -574,9 +574,11 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 		// Add new sequence
 		batch := *s.sequenceData[batchNumber].batch
 		sequences = append(sequences, batch)
+		firstSequence := sequences[0]
+		lastSequence := sequences[len(sequences)-1]
 
 		// Check if can be send
-		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
+		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
 
 		if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
 			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
@@ -588,7 +590,8 @@ func (s *SequenceSender) getSequencesToSend(ctx context.Context) ([]types.Sequen
 			sequences, err = s.handleEstimateGasSendSequenceErr(ctx, sequences, batchNumber, err)
 			if sequences != nil {
 				// Handling the error gracefully, re-processing the sequence as a sanity check
-				_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, s.cfg.L2Coinbase)
+				lastSequence = sequences[len(sequences)-1]
+				_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
 				return sequences, err
 			}
 			return sequences, err
@@ -817,9 +820,9 @@ func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) 
 
 	// Create sequence
 	sequence := types.Sequence{
-		GlobalExitRoot: l2BlockStart.GlobalExitRoot,
-		Timestamp:      l2BlockStart.Timestamp,
-		BatchNumber:    l2BlockStart.BatchNumber,
+		GlobalExitRoot:       l2BlockStart.GlobalExitRoot,
+		LastL2BLockTimestamp: l2BlockStart.Timestamp,
+		BatchNumber:          l2BlockStart.BatchNumber,
 	}
 
 	// Add to the list
@@ -956,7 +959,7 @@ func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 // printSequences prints data from slice of type sequences
 func printSequences(sequences []types.Sequence) {
 	for i, seq := range sequences {
-		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.Timestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
+		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.LastL2BLockTimestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
 	}
 }
 
