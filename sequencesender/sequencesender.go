@@ -37,7 +37,7 @@ const (
 type SequenceSender struct {
 	cfg                 Config
 	ethTxManager        *ethtxmanager.Client
-	etherman            *etherman.Client
+	etherman            ethermaner
 	currentNonce        uint64
 	latestVirtualBatch  uint64                     // Latest virtualized batch obtained from L1
 	latestVirtualTime   time.Time                  // Latest virtual batch timestamp
@@ -83,7 +83,7 @@ type ethTxAdditionalData struct {
 }
 
 // New inits sequence sender
-func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
+func New(cfg Config, etherman ethermaner) (*SequenceSender, error) {
 	// Create sequencesender
 	s := SequenceSender{
 		cfg:               cfg,

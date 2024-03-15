@@ -22,6 +22,13 @@ var (
 	ErrNoSigner = errors.New("no signer to authorize the transaction with")
 	// ErrMissingTrieNode means that a node is missing on the trie
 	ErrMissingTrieNode = errors.New("missing trie node")
+	// ErrNotFound is used when the object is not found
+	ErrNotFound = errors.New("not found")
+	// ErrIsReadOnlyMode is used when the EtherMan client is in read-only mode.
+	ErrIsReadOnlyMode = errors.New("etherman client in read-only mode: no account configured to send transactions to L1. " +
+		"please check the [Etherman] PrivateKeyPath and PrivateKeyPassword configuration")
+	// ErrPrivateKeyNotFound used when the provided sender does not have a private key registered to be used
+	ErrPrivateKeyNotFound = errors.New("can't find sender private key to sign tx")
 
 	errorsCache = map[string]error{
 		ErrGasRequiredExceedsAllowance.Error():             ErrGasRequiredExceedsAllowance,

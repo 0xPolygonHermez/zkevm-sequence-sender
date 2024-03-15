@@ -47,16 +47,49 @@ An example of the content of the JSON persistence file.
 
 
 ## Config
-To the existing configuration in the SequenceSender from the [Node](https://github.com/0xPolygonHermez/zkevm-node), the following configuration parameters have been added.
+To the existing configuration in the SequenceSender section from the Node, the following new configuration parameters have been added:
 
-Wait time for a finalized transaction to be purged from the persistence file:
+Maximum number of transactions pending completion. Once this number is reached, no new transactions will be sent until one completes (that reaches the `consolidated` state):
+```
+[SequenceSender]
+MaxPendingTx=1
+```
+
+Wait time for a `finalized` transaction to be purged from the persistence file:
 ```
 [SequenceSender]
 WaitPeriodPurgeTxFile=48h
 ```
 
-Maximum number of transactions pending completion. Once this number is reached, no new transactions will be sent until one completes:
+**Reminder**: Important to set the stream client config to point to the data stream server:
 ```
 [SequenceSender]
-MaxPendingTx=1
+  ...
+	[SequenceSender.StreamClient]
+		Server = "127.0.0.1:6900"
+
+```
+
+> You can see a complete configuration file example [here](./test/config/local.node.config.toml)
+
+
+## Running SequenceSender
+### Build
+Build the sequence sender executable file
+
+```bash
+make build
+```
+The binary file (`zkevm-seqsender`) will be left at path `./dist`
+
+### Run
+The execution command follows the format of the Node components. Example:
+
+```bash
+dist/zkevm-seqsender run --cfg ./test/config/local.node.config.toml --components sequence-sender
+```
+
+Another example setting a network customization file:
+```bash
+dist/zkevm-seqsender run --network custom --custom-network-file ./test/config/mynet.genesis.config.json --cfg ./test/config/mynet.config.toml --components sequence-sender
 ```

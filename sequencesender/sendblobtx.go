@@ -45,7 +45,7 @@ func (s *SequenceSender) createSendBlobTx(ctx context.Context, maxPrioFee uint64
 		GasFeeCap:  uint256.NewInt(maxFeePerGas * 1000000000), // nolint:gomnd // maxFeePerGas
 		BlobFeeCap: uint256.NewInt(maxBlobFee * 1000000000),   // nolint:gomnd // maxFeePerBlobGas
 		Gas:        gasLimit,
-		To:         common.HexToAddress(s.etherman.SCAddresses[0].Hex()),
+		To:         common.HexToAddress("0x01"), //s.etherman.SCAddresses[0].Hex()),
 		Value:      uint256.NewInt(value),
 		Data:       data,
 		BlobHashes: make([]common.Hash, 0),
