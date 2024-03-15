@@ -7,7 +7,6 @@ require (
 	github.com/ethereum/go-ethereum v1.13.11
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/hermeznetwork/tracerr v0.3.2
-	github.com/iden3/go-iden3-crypto v0.0.15
 	github.com/invopop/jsonschema v0.12.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_model v0.5.0
@@ -17,7 +16,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/urfave/cli/v2 v2.26.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/crypto v0.18.0
+	golang.org/x/crypto v0.18.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/sync v0.5.0 // indirect
 	google.golang.org/protobuf v1.32.0 // indirect
