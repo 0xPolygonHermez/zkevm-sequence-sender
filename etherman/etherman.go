@@ -7,14 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/etherscan"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/ethgasstation"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/oldpolygonzkevm"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/oldpolygonzkevmglobalexitroot"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/pol"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonrollupmanager"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonzkevm"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/polygonzkevmglobalexitroot"
 	ethmanTypes "github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/ethereum/go-ethereum"
@@ -53,25 +47,13 @@ type L1Config struct {
 	GlobalExitRootManagerAddr common.Address `json:"polygonZkEVMGlobalExitRootAddress"`
 }
 
-type externalGasProviders struct {
-	MultiGasProvider bool
-	Providers        []ethereum.GasPricer
-}
-
 // Client is a simple implementation of EtherMan.
 type Client struct {
-	EthClient                ethereumClient
-	OldZkEVM                 *oldpolygonzkevm.Oldpolygonzkevm
-	ZkEVM                    *polygonzkevm.Polygonzkevm
-	RollupManager            *polygonrollupmanager.Polygonrollupmanager
-	GlobalExitRootManager    *polygonzkevmglobalexitroot.Polygonzkevmglobalexitroot
-	OldGlobalExitRootManager *oldpolygonzkevmglobalexitroot.Oldpolygonzkevmglobalexitroot
-	Pol                      *pol.Pol
-	SCAddresses              []common.Address
+	EthClient     ethereumClient
+	ZkEVM         *polygonzkevm.Polygonzkevm
+	RollupManager *polygonrollupmanager.Polygonrollupmanager
 
 	RollupID uint32
-
-	GasProviders externalGasProviders
 
 	l1Cfg L1Config
 	cfg   Config
@@ -91,35 +73,11 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	oldZkevm, err := oldpolygonzkevm.NewOldpolygonzkevm(l1Config.RollupManagerAddr, ethClient)
-	if err != nil {
-		return nil, err
-	}
 	rollupManager, err := polygonrollupmanager.NewPolygonrollupmanager(l1Config.RollupManagerAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
-	globalExitRoot, err := polygonzkevmglobalexitroot.NewPolygonzkevmglobalexitroot(l1Config.GlobalExitRootManagerAddr, ethClient)
-	if err != nil {
-		return nil, err
-	}
-	pol, err := pol.NewPol(l1Config.PolAddr, ethClient)
-	if err != nil {
-		return nil, err
-	}
-	var scAddresses []common.Address
-	scAddresses = append(scAddresses, l1Config.ZkEVMAddr, l1Config.RollupManagerAddr, l1Config.GlobalExitRootManagerAddr)
 
-	gProviders := []ethereum.GasPricer{ethClient}
-	if cfg.EthermanConfig.MultiGasProvider {
-		if cfg.EthermanConfig.Etherscan.ApiKey == "" {
-			log.Info("No ApiKey provided for etherscan. Ignoring provider...")
-		} else {
-			log.Info("ApiKey detected for etherscan")
-			gProviders = append(gProviders, etherscan.NewEtherscanService(cfg.EthermanConfig.Etherscan.ApiKey))
-		}
-		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
-	}
 	// Get RollupID
 	rollupID, err := rollupManager.RollupAddressToID(&bind.CallOpts{Pending: false}, l1Config.ZkEVMAddr)
 	if err != nil {
@@ -128,21 +86,13 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	log.Debug("rollupID: ", rollupID)
 
 	return &Client{
-		EthClient:             ethClient,
-		ZkEVM:                 zkevm,
-		OldZkEVM:              oldZkevm,
-		RollupManager:         rollupManager,
-		Pol:                   pol,
-		GlobalExitRootManager: globalExitRoot,
-		SCAddresses:           scAddresses,
-		RollupID:              rollupID,
-		GasProviders: externalGasProviders{
-			MultiGasProvider: cfg.EthermanConfig.MultiGasProvider,
-			Providers:        gProviders,
-		},
-		l1Cfg: l1Config,
-		cfg:   cfg,
-		auth:  map[common.Address]bind.TransactOpts{},
+		EthClient:     ethClient,
+		ZkEVM:         zkevm,
+		RollupManager: rollupManager,
+		RollupID:      rollupID,
+		l1Cfg:         l1Config,
+		cfg:           cfg,
+		auth:          map[common.Address]bind.TransactOpts{},
 	}, nil
 }
 
@@ -265,7 +215,7 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 			"method": "eth_call",
 			"params": [{"from": "%s","to":"%s","data":"0x%s"},"0x%s"],
 			"id": 1
-		}'`, opts.From, &etherMan.SCAddresses[0], common.Bytes2Hex(input), b)
+		}'`, opts.From, etherMan.l1Cfg.ZkEVMAddr, common.Bytes2Hex(input), b)
 		if parsedErr, ok := tryParseError(err); ok {
 			err = parsedErr
 		}
