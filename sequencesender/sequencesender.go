@@ -163,7 +163,6 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	s.fromStreamBatch = s.latestVirtualBatch
 	bookmark := []byte{state.BookMarkTypeBatch}
 	bookmark = binary.BigEndian.AppendUint64(bookmark, s.fromStreamBatch)
-	s.streamClient.FromBookmark = bookmark
 	log.Infof("[SeqSender] stream client from bookmark %v", bookmark)
 
 	// Current batch to sequence
@@ -174,7 +173,7 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	go s.sequenceSending(ctx)
 
 	// Start receiving the streaming
-	err = s.streamClient.ExecCommand(datastreamer.CmdStartBookmark)
+	err = s.streamClient.ExecCommandStartBookmark(bookmark)
 	if err != nil {
 		log.Fatalf("[SeqSender] failed to connect to the streaming")
 	}
@@ -510,7 +509,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	}
 
 	// Add sequence tx
-	txHash, err := s.ethTxManager.Add(ctx, paramTo, paramNonce, big.NewInt(0), paramData)
+	txHash, err := s.ethTxManager.Add(ctx, paramTo, paramNonce, big.NewInt(0), paramData, nil)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
 		return err

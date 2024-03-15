@@ -759,7 +759,6 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	}
 	parentExcessBlobGas := eip4844.CalcExcessBlobGas(*parentHeader.ExcessBlobGas, *parentHeader.BlobGasUsed)
 	blobFeeCap := eip4844.CalcBlobFee(parentExcessBlobGas)
-	log.Infof("excessBlobGas[%d], blobFeeCap[%d]", parentExcessBlobGas, blobFeeCap)
 
 	// Transaction
 	blobTx := types.NewTx(&types.BlobTx{

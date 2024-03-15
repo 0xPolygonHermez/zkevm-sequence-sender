@@ -17,6 +17,27 @@ import (
 	"github.com/holiman/uint256"
 )
 
+// TEST BLOB
+// s.currentNonce, err = s.etherman.CurrentNonce(ctx, common.HexToAddress("0x6c50a878df81d7e49424968dfac5e1409bccb68f"))
+// if err != nil {
+// 	log.Fatalf("[SeqSender] failed to get current nonce, error: %v", err)
+// } else {
+// 	log.Infof("[SeqSender] current nonce is %d", s.currentNonce)
+// }
+// blobs := []string{"0x1111111111111111", "0x2222222222222222", "0x3333333333333333", "0x4444444444444444"}
+
+// a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
+// if err != nil {
+// 	log.Error("error getting abi. Error: ", err)
+// }
+// input, err := a.Pack("pol")
+// log.Infof("%v", input)
+// if err != nil {
+// 	log.Error("error packing call. Error: ", err)
+// }
+// _ = s.createSendBlobTx(ctx, 4, 200, 30, 500000, 0, input, blobs) // nolint:gomnd
+// log.Fatalf("END")
+
 func (s *SequenceSender) createSendBlobTx(ctx context.Context, maxPrioFee uint64, maxFeePerGas uint64, maxBlobFee uint64, gasLimit uint64, value uint64, data []byte, blobData []string) error {
 	// Blob transaction
 	txData := types.BlobTx{
