@@ -18,7 +18,7 @@ import (
 )
 
 // TEST BLOB
-// s.currentNonce, err = s.etherman.CurrentNonce(ctx, common.HexToAddress("0x6c50a878df81d7e49424968dfac5e1409bccb68f"))
+// s.currentNonce, err = s.etherman.CurrentNonce(ctx, common.HexToAddress("0xFA3b44587990F97bA8b6ba7e230A5F0E95D14b3d"))
 // if err != nil {
 // 	log.Fatalf("[SeqSender] failed to get current nonce, error: %v", err)
 // } else {
