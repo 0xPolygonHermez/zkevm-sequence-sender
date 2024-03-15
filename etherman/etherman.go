@@ -737,7 +737,7 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	}
 
 	estimateDataCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas())).Uint64()
-	log.Infof(">> tx DATA cost: %d gas x %d gasPrice = %d Gwei", tx.Gas(), tx.GasPrice().Uint64(), estimateDataCost/GWEI_DIV)
+	log.Infof(">> tx DATA cost: %9d Gwei = %d gas x %d gasPrice", estimateDataCost/GWEI_DIV, tx.Gas(), tx.GasPrice().Uint64())
 
 	// Construct blob data
 	var blobBytes []byte
@@ -772,9 +772,14 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	})
 
 	estimateBlobCost := new(big.Int).Mul(blobFeeCap, new(big.Int).SetUint64(blobTx.BlobGas())).Uint64()
-	log.Infof(">> tx BLOB cost: %d blobGas x %d blobGasPrice = %d Gwei", blobTx.BlobGas(), blobFeeCap.Uint64(), estimateBlobCost/GWEI_DIV)
+	log.Infof(">> tx BLOB cost: %9d Gwei = %d blobGas x %d blobGasPrice", estimateBlobCost/GWEI_DIV, blobTx.BlobGas(), blobFeeCap.Uint64())
 
-	return tx, nil
+	// Return the cheapest one
+	if estimateBlobCost*100000 < estimateDataCost {
+		return blobTx, nil
+	} else {
+		return tx, nil
+	}
 }
 
 // BuildSequenceBatchesTxData builds a []bytes to be sent to the PoE SC method SequenceBatches.

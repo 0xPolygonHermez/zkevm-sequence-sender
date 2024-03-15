@@ -29,7 +29,8 @@ var (
 )
 
 const (
-	sendUsingBlobs = false
+	// BLOB_TX_TYPE is a blob transaction type
+	BLOB_TX_TYPE = byte(0x03)
 )
 
 // SequenceSender represents a sequence sender
@@ -445,7 +446,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 
 	// Check if should send sequence to L1
 	log.Infof("[SeqSender] getting sequences to send")
-	sequences, err := s.getSequencesToSend()
+	sequences, useBlobs, err := s.getSequencesToSend()
 	if err != nil || len(sequences) == 0 {
 		if err != nil {
 			log.Errorf("[SeqSender] error getting sequences: %v", err)
@@ -461,7 +462,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	printSequences(sequences)
 
 	// Build sequence data
-	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase, sendUsingBlobs)
+	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase, useBlobs)
 	if err != nil {
 		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
 		return
@@ -551,10 +552,11 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 }
 
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
-func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
+func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, bool, error) {
 	// Add sequences until too big for a single L1 tx or last batch is reached
 	s.mutexSequence.Lock()
 	defer s.mutexSequence.Unlock()
+	useBlobs := false
 	sequences := []types.Sequence{}
 	for i := 0; i < len(s.sequenceList); i++ {
 		batchNumber := s.sequenceList[i]
@@ -565,7 +567,7 @@ func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
 		// Check if the next batch belongs to a new forkid, in this case we need to stop sequencing as we need to
 		// wait the upgrade of forkid is completed and s.cfg.NumBatchForkIdUpgrade is disabled (=0) again
 		if (s.cfg.ForkUpgradeBatchNumber != 0) && (batchNumber == (s.cfg.ForkUpgradeBatchNumber + 1)) {
-			return nil, fmt.Errorf("aborting sequencing process as we reached the batch %d where a new forkid is applied (upgrade)", s.cfg.ForkUpgradeBatchNumber+1)
+			return nil, false, fmt.Errorf("aborting sequencing process as we reached the batch %d where a new forkid is applied (upgrade)", s.cfg.ForkUpgradeBatchNumber+1)
 		}
 
 		// Check if batch is closed
@@ -582,49 +584,48 @@ func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
 
 		// Check if can be send
 		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-		if sendUsingBlobs {
+		useBlobs = tx.Type() == BLOB_TX_TYPE
 
-		} else {
-			if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
-				log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
-				err = ErrOversizedData
-			}
+		if err == nil && !useBlobs && tx.Size() > s.cfg.MaxTxSizeForL1 {
+			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
+			err = ErrOversizedData
+		}
 
-			if err != nil {
-				log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
-				sequences, err = s.handleEstimateGasSendSequenceErr(sequences, batchNumber, err)
-				if sequences != nil {
-					if len(sequences) > 0 {
-						// Handling the error gracefully, re-processing the sequence as a sanity check
-						lastSequence = sequences[len(sequences)-1]
-						_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-						return sequences, err
-					}
+		if err != nil {
+			log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
+			sequences, err = s.handleEstimateGasSendSequenceErr(sequences, batchNumber, err)
+			if sequences != nil {
+				if len(sequences) > 0 {
+					// Handling the error gracefully, re-processing the sequence as a sanity check
+					lastSequence = sequences[len(sequences)-1]
+					_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+					useBlobs = tx.Type() == BLOB_TX_TYPE
+					return sequences, useBlobs, err
 				}
-				return sequences, err
 			}
+			return sequences, useBlobs, err
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
 		if (s.cfg.ForkUpgradeBatchNumber != 0) && (batchNumber == (s.cfg.ForkUpgradeBatchNumber)) {
 			log.Infof("[SeqSender] sequence should be sent to L1, as we have reached the batch %d from which a new forkid is applied (upgrade)", s.cfg.ForkUpgradeBatchNumber)
-			return sequences, nil
+			return sequences, useBlobs, nil
 		}
 	}
 
 	// Reached latest batch. Decide if it's worth to send the sequence, or wait for new batches
 	if len(sequences) == 0 {
 		log.Infof("[SeqSender] no batches to be sequenced")
-		return nil, nil
+		return nil, false, nil
 	}
 
 	if s.latestVirtualTime.Before(time.Now().Add(-s.cfg.LastBatchVirtualizationTimeMaxWaitPeriod.Duration)) {
 		log.Infof("[SeqSender] sequence should be sent, too much time without sending anything to L1")
-		return sequences, nil
+		return sequences, useBlobs, nil
 	}
 
 	log.Infof("[SeqSender] not enough time has passed since last batch was virtualized and the sequence could be bigger")
-	return nil, nil
+	return nil, false, nil
 }
 
 // handleEstimateGasSendSequenceErr handles an error on the estimate gas. Results: (nil,nil)=requires waiting, (nil,error)=no handled gracefully, (seq,nil) handled gracefully
