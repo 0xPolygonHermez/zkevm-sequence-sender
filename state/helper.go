@@ -1,21 +1,25 @@
 package state
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strconv"
 
-	"github.com/0xPolygonHermez/zkevm-node/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/hex"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/crypto/sha3"
 )
 
 const (
 	double       = 2
 	ether155V    = 27
 	etherPre155V = 35
+	// MaxEffectivePercentage is the maximum value that can be used as effective percentage
+	MaxEffectivePercentage = uint8(255)
 	// Decoding constants
 	headerByteLength uint64 = 1
 	sLength          uint64 = 32
@@ -30,27 +34,27 @@ const (
 	EfficiencyPercentageByteLength uint64 = 1
 )
 
-const (
-	// FORKID_BLUEBERRY is the fork id 4
-	FORKID_BLUEBERRY = 4
-	// FORKID_DRAGONFRUIT is the fork id 5
-	FORKID_DRAGONFRUIT = 5
-	// FORKID_INCABERRY is the fork id 6
-	FORKID_INCABERRY = 6
-	// FORKID_ETROG is the fork id 7
-	FORKID_ETROG = 7
-)
+// EncodeTransactions RLP encodes the given transactions
+func EncodeTransactions(txs []types.Transaction, effectivePercentages []uint8, forkID uint64) ([]byte, error) {
+	var batchL2Data []byte
 
-var (
-	// ErrInvalidData is the error when the raw txs is unexpected
-	ErrInvalidData = errors.New("invalid data")
-)
+	for i, tx := range txs {
+		txData, err := prepareRLPTxData(tx)
+		if err != nil {
+			return nil, err
+		}
+		batchL2Data = append(batchL2Data, txData...)
 
-// IsPreEIP155Tx checks if the tx is a tx that has a chainID as zero and
-// V field is either 27 or 28
-func IsPreEIP155Tx(tx types.Transaction) bool {
-	v, _, _ := tx.RawSignatureValues()
-	return tx.ChainId().Uint64() == 0 && (v.Uint64() == 27 || v.Uint64() == 28)
+		if forkID >= FORKID_DRAGONFRUIT {
+			effectivePercentageAsHex, err := hex.DecodeHex(fmt.Sprintf("%x", effectivePercentages[i]))
+			if err != nil {
+				return nil, err
+			}
+			batchL2Data = append(batchL2Data, effectivePercentageAsHex...)
+		}
+	}
+
+	return batchL2Data, nil
 }
 
 func prepareRLPTxData(tx types.Transaction) ([]byte, error) {
@@ -87,6 +91,78 @@ func prepareRLPTxData(tx types.Transaction) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return txData, nil
+}
+
+// EncodeTransactionsWithoutEffectivePercentage RLP encodes the given transactions without the effective percentage
+func EncodeTransactionsWithoutEffectivePercentage(txs []types.Transaction) ([]byte, error) {
+	var batchL2Data []byte
+
+	for _, tx := range txs {
+		txData, err := prepareRLPTxData(tx)
+		if err != nil {
+			return nil, err
+		}
+		batchL2Data = append(batchL2Data, txData...)
+	}
+
+	return batchL2Data, nil
+}
+
+// EncodeTransactionWithoutEffectivePercentage RLP encodes the given transaction without the effective percentage
+func EncodeTransactionWithoutEffectivePercentage(tx types.Transaction) ([]byte, error) {
+	return EncodeTransactionsWithoutEffectivePercentage([]types.Transaction{tx})
+}
+
+// EncodeTransaction RLP encodes the given transaction
+func EncodeTransaction(tx types.Transaction, effectivePercentage uint8, forkID uint64) ([]byte, error) {
+	return EncodeTransactions([]types.Transaction{tx}, []uint8{effectivePercentage}, forkID)
+}
+
+// EncodeUnsignedTransaction RLP encodes the given unsigned transaction
+func EncodeUnsignedTransaction(tx types.Transaction, chainID uint64, forcedNonce *uint64, forkID uint64) ([]byte, error) {
+	v, _ := new(big.Int).SetString("0x1c", 0)
+	r, _ := new(big.Int).SetString("0xa54492cfacf71aef702421b7fbc70636537a7b2fbe5718c5ed970a001bb7756b", 0)
+	s, _ := new(big.Int).SetString("0x2e9fb27acc75955b898f0b12ec52aa34bf08f01db654374484b80bf12f0d841e", 0)
+
+	sign := 1 - (v.Uint64() & 1)
+
+	nonce, gasPrice, gas, to, value, data, chainID := tx.Nonce(), tx.GasPrice(), tx.Gas(), tx.To(), tx.Value(), tx.Data(), chainID //nolint:gomnd
+	log.Debug(nonce, " ", gasPrice, " ", gas, " ", to, " ", value, " ", len(data), " ", chainID)
+
+	if forcedNonce != nil {
+		nonce = *forcedNonce
+		log.Debug("Forced nonce: ", nonce)
+	}
+
+	txCodedRlp, err := rlp.EncodeToBytes([]interface{}{
+		nonce,
+		gasPrice,
+		gas,
+		to,
+		value,
+		data,
+		big.NewInt(0).SetUint64(chainID), uint(0), uint(0),
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	newV := new(big.Int).Add(big.NewInt(ether155V), big.NewInt(int64(sign)))
+	newRPadded := fmt.Sprintf("%064s", r.Text(hex.Base))
+	newSPadded := fmt.Sprintf("%064s", s.Text(hex.Base))
+	newVPadded := fmt.Sprintf("%02s", newV.Text(hex.Base))
+	effectivePercentageAsHex := fmt.Sprintf("%x", MaxEffectivePercentage)
+	// Only add EffectiveGasprice if forkID is equal or higher than DRAGONFRUIT_FORKID
+	if forkID < FORKID_DRAGONFRUIT {
+		effectivePercentageAsHex = ""
+	}
+	txData, err := hex.DecodeString(hex.EncodeToString(txCodedRlp) + newRPadded + newSPadded + newVPadded + effectivePercentageAsHex)
+	if err != nil {
+		return nil, err
+	}
+
 	return txData, nil
 }
 
@@ -200,4 +276,82 @@ func DecodeTx(encodedTx string) (*types.Transaction, error) {
 		return nil, err
 	}
 	return tx, nil
+}
+
+// GenerateReceipt generates a receipt from a processed transaction
+func GenerateReceipt(blockNumber *big.Int, processedTx *ProcessTransactionResponse, txIndex uint) *types.Receipt {
+	receipt := &types.Receipt{
+		Type:              uint8(processedTx.Type),
+		PostState:         processedTx.StateRoot.Bytes(),
+		CumulativeGasUsed: processedTx.GasUsed,
+		BlockNumber:       blockNumber,
+		GasUsed:           processedTx.GasUsed,
+		TxHash:            processedTx.Tx.Hash(),
+		TransactionIndex:  txIndex,
+		ContractAddress:   processedTx.CreateAddress,
+		Logs:              processedTx.Logs,
+	}
+
+	if processedTx.EffectiveGasPrice != "" {
+		effectiveGasPrice, ok := big.NewInt(0).SetString(processedTx.EffectiveGasPrice, 0)
+		if !ok {
+			log.Errorf("error converting effective gas price %s to big.Int", processedTx.EffectiveGasPrice)
+		}
+		receipt.EffectiveGasPrice = effectiveGasPrice
+	}
+
+	// TODO: this fix is temporary while the Executor is returning a
+	// different Tx hash for the TxHash, Log.TxHash and Tx.Hash().
+	// At the moment, the processedTx.TxHash and Log[n].TxHash are
+	// returning a different hash than the Hash of the transaction
+	// sent to be processed by the Executor.
+	// The processedTx.Tx.Hash() is correct.
+	for i := 0; i < len(receipt.Logs); i++ {
+		receipt.Logs[i].TxHash = processedTx.Tx.Hash()
+	}
+	if processedTx.RomError == nil {
+		receipt.Status = types.ReceiptStatusSuccessful
+	} else {
+		receipt.Status = types.ReceiptStatusFailed
+	}
+
+	return receipt
+}
+
+// IsPreEIP155Tx checks if the tx is a tx that has a chainID as zero and
+// V field is either 27 or 28
+func IsPreEIP155Tx(tx types.Transaction) bool {
+	v, _, _ := tx.RawSignatureValues()
+	return tx.ChainId().Uint64() == 0 && (v.Uint64() == 27 || v.Uint64() == 28)
+}
+
+// CheckLogOrder checks the order of the logs. The order should be incremental
+func CheckLogOrder(logs []*types.Log) bool {
+	logsAux := make([]*types.Log, len(logs))
+	copy(logsAux, logs)
+	sort.Slice(logsAux, func(i, j int) bool {
+		return logsAux[i].Index < logsAux[j].Index
+	})
+	if len(logs) != len(logsAux) {
+		return false
+	}
+	for i := range logs {
+		if logsAux[i].Index != logs[i].Index {
+			log.Debug("Array index: ", i, ". Index of log on each array: ", logsAux[i].Index, logs[i].Index)
+			return false
+		}
+	}
+	return true
+}
+
+// Ptr returns a pointer for any instance
+func Ptr[T any](v T) *T {
+	return &v
+}
+
+// HashByteArray returns the hash of the given byte array
+func HashByteArray(data []byte) common.Hash {
+	sha := sha3.NewLegacyKeccak256()
+	sha.Write(data)
+	return common.BytesToHash(sha.Sum(nil))
 }
