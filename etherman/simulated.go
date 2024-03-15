@@ -61,7 +61,7 @@ func NewSimulatedEtherman(cfg Config, auth *bind.TransactOpts) (*Client, *simula
 	const posRollupManager = 4
 	calculatedRollupManagerAddr := crypto.CreateAddress(auth.From, nonce+posRollupManager)
 	genesis := common.HexToHash("0xfd3434cd8f67e59d73488a2b8da242dd1f02849ea5dd99f0ca22c836c3d5b4a9") // Random value. Needs to be different to 0x0
-	exitManagerAddr, _, globalExitRoot, err := polygonzkevmglobalexitroot.DeployPolygonzkevmglobalexitroot(auth, client.Client(), calculatedRollupManagerAddr, calculatedBridgeAddr)
+	exitManagerAddr, _, _, err := polygonzkevmglobalexitroot.DeployPolygonzkevmglobalexitroot(auth, client.Client(), calculatedRollupManagerAddr, calculatedBridgeAddr)
 	if err != nil {
 		log.Error("error: ", err)
 		return nil, nil, common.Address{}, nil, err
@@ -190,15 +190,12 @@ func NewSimulatedEtherman(cfg Config, auth *bind.TransactOpts) (*Client, *simula
 	client.Commit()
 
 	c := &Client{
-		EthClient:             client.Client(),
-		ZkEVM:                 trueZkevm,
-		RollupManager:         rollupManager,
-		Pol:                   polContract,
-		GlobalExitRootManager: globalExitRoot,
-		RollupID:              rollupID,
-		SCAddresses:           []common.Address{zkevmAddr, mockRollupManagerAddr, exitManagerAddr},
-		auth:                  map[common.Address]bind.TransactOpts{},
-		cfg:                   cfg,
+		EthClient:     client.Client(),
+		ZkEVM:         trueZkevm,
+		RollupManager: rollupManager,
+		RollupID:      rollupID,
+		auth:          map[common.Address]bind.TransactOpts{},
+		cfg:           cfg,
 	}
 	err = c.AddOrReplaceAuth(*auth)
 	if err != nil {
