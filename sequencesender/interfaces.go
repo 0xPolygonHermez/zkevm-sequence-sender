@@ -11,8 +11,9 @@ import (
 
 type ethermaner interface {
 	CurrentNonce(ctx context.Context, account common.Address) (uint64, error)
-	BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address, useBlobs bool) (to *common.Address, data []byte, err error)
 	EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error)
+	BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error)
+	BuildSequenceBatchesTxBlob(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, sidecar *types.BlobTxSidecar, err error)
 	GetLatestBatchNumber() (uint64, error)
 	SendTx(ctx context.Context, tx *types.Transaction) error
 	LoadAuthFromKeyStore(path, password string) (*bind.TransactOpts, error)

@@ -2,6 +2,7 @@ package etherman
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -112,7 +113,7 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	opts.NoSend = true
 
 	// Cost using calldata
-	tx, err := etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
+	tx, err := etherMan.sequenceBatchesData(opts, sequences, maxSequenceTimestamp, initSequenceBatchNumber, l2Coinbase)
 	if err != nil {
 		return nil, err
 	}
@@ -163,11 +164,11 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	}
 }
 
-// BuildSequenceBatchesTxData builds a []bytes to be sent to the PoE SC method SequenceBatches.
-func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address, useBlobs bool) (to *common.Address, data []byte, err error) {
+// BuildSequenceBatchesTxData builds a []bytes to be sent as calldata to the SC method SequenceBatches
+func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error) {
 	opts, err := etherMan.getAuthByAddress(sender)
 	if err == ErrNotFound {
-		return nil, nil, fmt.Errorf("failed to build sequence batches, err: %w", ErrPrivateKeyNotFound)
+		return nil, nil, fmt.Errorf("failed to build sequence batches: %w", ErrPrivateKeyNotFound)
 	}
 	opts.NoSend = true
 	// force nonce, gas limit and gas price to avoid querying it from the chain
@@ -176,114 +177,38 @@ func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequen
 	opts.GasPrice = big.NewInt(1)
 
 	var tx *types.Transaction
-	tx, err = etherMan.sequenceBatches(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	tx, err = etherMan.sequenceBatchesData(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 	if err != nil {
 		return nil, nil, err
-	}
-	if useBlobs {
-		// Construct non-blob fields
-		// a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
-		// if err != nil {
-		// 	log.Error("failed to get abi: %v", err)
-		// }
-		// input, err := a.Pack("pol")
-		// if err != nil {
-		// 	log.Error("failed packing call: %v", err)
-		// }
-
-		toAddress := common.HexToAddress("0x01") //etherMan.SCAddresses[0].Hex())
-		fromAddress := opts.From
-		chainID := big.NewInt(int64(etherMan.cfg.EthermanConfig.L1ChainID))
-
-		nonce, err := etherMan.CurrentNonce(context.Background(), fromAddress)
-		if err != nil {
-			log.Errorf("failed to get current nonce: %v", err)
-			return nil, nil, err
-		}
-
-		gasTipCap, err := etherMan.EthClient.SuggestGasTipCap(context.Background())
-		if err != nil {
-			log.Errorf("failed to get suggest gas tip cap: %v", err)
-			return nil, nil, err
-		}
-
-		gasFeeCap, err := etherMan.EthClient.SuggestGasPrice(context.Background())
-		if err != nil {
-			log.Errorf("failed to get suggest gas price: %v", err)
-			return nil, nil, err
-		}
-
-		gasLimit, err := etherMan.EthClient.EstimateGas(context.Background(),
-			ethereum.CallMsg{
-				From:      fromAddress,
-				To:        &toAddress,
-				GasFeeCap: gasFeeCap,
-				GasTipCap: gasTipCap,
-				Value:     big.NewInt(0),
-			})
-		if err != nil {
-			log.Errorf("failed to estimate gas: %v", err)
-			return nil, nil, err
-		}
-
-		// Estimate blob fee cap
-		parentHeader, err := etherMan.EthClient.HeaderByNumber(context.Background(), nil)
-		if err != nil {
-			log.Errorf("failed to get header from previous block: %v", err)
-			return nil, nil, err
-		}
-		parentExcessBlobGas := eip4844.CalcExcessBlobGas(*parentHeader.ExcessBlobGas, *parentHeader.BlobGasUsed)
-		blobFeeCap := eip4844.CalcBlobFee(parentExcessBlobGas)
-		log.Infof("blob gas: excessBlobGas[%d], blobFeeCap[%d]", parentExcessBlobGas, blobFeeCap)
-
-		// Construct blob data
-		var blobBytes []byte
-		for _, seq := range sequences {
-			blobBytes = append(blobBytes, seq.BatchL2Data...)
-		}
-
-		blob, err := encodeBlobData(blobBytes)
-		if err != nil {
-			return nil, nil, err
-		}
-		sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
-		blobHashes := sidecar.BlobHashes()
-		// Transaction
-		tx = types.NewTx(&types.BlobTx{
-			ChainID:    uint256.MustFromBig(chainID),
-			Nonce:      nonce,
-			GasTipCap:  uint256.MustFromBig(gasTipCap),
-			GasFeeCap:  uint256.MustFromBig(gasFeeCap),
-			Gas:        gasLimit * 12 / 10, // nolint:gomnd
-			To:         toAddress,
-			BlobFeeCap: uint256.MustFromBig(blobFeeCap),
-			BlobHashes: blobHashes,
-			Sidecar:    sidecar,
-		})
-
-		// Sign the transaction
-		if opts.Signer == nil {
-			log.Errorf("no signer to authorize the transaction with")
-			return nil, nil, errors.New("no signer to authorize the transaction with")
-		}
-		signedTx, err := opts.Signer(opts.From, tx)
-		if err != nil {
-			log.Errorf("failed to sign transaction: %v", err)
-			return nil, nil, err
-		}
-
-		// Send transaction
-		err = etherMan.EthClient.SendTransaction(context.Background(), signedTx)
-		if err != nil {
-			log.Errorf("failed to send transaction: %v", err)
-			return nil, nil, err
-		}
 	}
 
 	return tx.To(), tx.Data(), nil
 }
 
-func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
+// BuildSequenceBatchesTxBlob builds a types.BlobTxSidecar to be sent as blobs to the SC method SequenceBatchesBlob
+func (etherMan *Client) BuildSequenceBatchesTxBlob(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, sidecar *types.BlobTxSidecar, err error) {
+	opts, err := etherMan.getAuthByAddress(sender)
+	if err == ErrNotFound {
+		return nil, nil, nil, fmt.Errorf("failed to build sequence batches: %w", ErrPrivateKeyNotFound)
+	}
+	opts.NoSend = true
+	// force nonce, gas limit and gas price to avoid querying it from the chain
+	opts.Nonce = big.NewInt(1)
+	opts.GasLimit = uint64(1)
+	opts.GasPrice = big.NewInt(1)
+	opts.GasFeeCap = big.NewInt(1)
+	opts.GasTipCap = big.NewInt(1)
+
+	var tx *types.Transaction
+	tx, err = etherMan.sequenceBatchesBlob(opts, sequences, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return tx.To(), tx.Data(), tx.BlobTxSidecar(), nil
+}
+
+func (etherMan *Client) sequenceBatchesData(opts bind.TransactOpts, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
 	var batches []polygonzkevm.PolygonRollupBaseEtrogBatchData
 	for _, seq := range sequences {
 		var ger common.Hash
@@ -307,17 +232,17 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 		log.Debug("Sequencer address: ", opts.From)
 		a, err2 := polygonzkevm.PolygonzkevmMetaData.GetAbi()
 		if err2 != nil {
-			log.Error("error getting abi. Error: ", err2)
+			log.Errorf("error getting abi: %v", err2)
 		}
 		input, err3 := a.Pack("sequenceBatches", batches, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
 		if err3 != nil {
-			log.Error("error packing call. Error: ", err3)
+			log.Errorf("error packing call: %v", err3)
 		}
 		ctx := context.Background()
 		var b string
 		block, err4 := etherMan.EthClient.BlockByNumber(ctx, nil)
 		if err4 != nil {
-			log.Error("error getting blockNumber. Error: ", err4)
+			log.Errorf("error getting blockNumber: %v", err4)
 			b = "latest"
 		} else {
 			b = fmt.Sprintf("%x", block.Number())
@@ -337,6 +262,71 @@ func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethm
 	}
 
 	return tx, err
+}
+
+func (etherMan *Client) sequenceBatchesBlob(opts bind.TransactOpts, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error) {
+	// TMP: For testing purpose while the smart contracts are available
+	var batches []polygonzkevm.PolygonRollupBaseEtrogBatchData
+	for _, seq := range sequences {
+		var ger common.Hash
+		if seq.ForcedBatchTimestamp > 0 {
+			ger = seq.GlobalExitRoot
+		}
+		batch := polygonzkevm.PolygonRollupBaseEtrogBatchData{
+			Transactions:         seq.BatchL2Data,
+			ForcedGlobalExitRoot: ger,
+			ForcedTimestamp:      uint64(seq.ForcedBatchTimestamp),
+			ForcedBlockHashL1:    seq.PrevBlockHash,
+		}
+
+		batches = append(batches, batch)
+	}
+
+	a, err := polygonzkevm.PolygonzkevmMetaData.GetAbi()
+	if err != nil {
+		log.Errorf("error getting abi: %v", err)
+		return nil, err
+	}
+	input, err := a.Pack("sequenceBatches", []polygonzkevm.PolygonRollupBaseEtrogBatchData{}, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	if err != nil {
+		log.Errorf("error packing call: %v", err)
+		return nil, err
+	}
+
+	// Construct blob data
+	var blobBytes []byte
+	for _, batch := range batches {
+		blobBytes = append(blobBytes, batch.Transactions...)
+		blobBytes = append(blobBytes, batch.ForcedGlobalExitRoot[:]...)
+		blobBytes = binary.BigEndian.AppendUint64(blobBytes, batch.ForcedTimestamp)
+		blobBytes = append(blobBytes, batch.ForcedBlockHashL1[:]...)
+	}
+	blob, err := encodeBlobData(blobBytes)
+	if err != nil {
+		log.Errorf("error encoding blob: %v", err)
+		return nil, err
+	}
+	sidecar := makeBlobSidecar([]kzg4844.Blob{blob})
+	blobHashes := sidecar.BlobHashes()
+
+	// Transaction
+	blobTx := types.NewTx(&types.BlobTx{
+		To:         common.HexToAddress("0x31A6ae85297DD0EeBD66D7556941c33Bd41d565C"),
+		Nonce:      opts.Nonce.Uint64(),
+		GasTipCap:  uint256.MustFromBig(opts.GasTipCap),
+		GasFeeCap:  uint256.MustFromBig(opts.GasFeeCap),
+		BlobFeeCap: uint256.NewInt(1),
+		BlobHashes: blobHashes,
+		Data:       input,
+		Sidecar:    sidecar,
+	})
+
+	signedTx, err := opts.Signer(opts.From, blobTx)
+	if err != nil {
+		return nil, err
+	}
+
+	return signedTx, err
 }
 
 // AddOrReplaceAuth adds an authorization or replace an existent one to the same account

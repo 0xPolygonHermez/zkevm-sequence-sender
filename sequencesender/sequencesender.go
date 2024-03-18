@@ -17,10 +17,11 @@ import (
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
 	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
+	ethmanTypes "github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 var (
@@ -59,7 +60,7 @@ type SequenceSender struct {
 
 type sequenceData struct {
 	batchClosed bool
-	batch       *types.Sequence
+	batch       *ethmanTypes.Sequence
 	batchRaw    *state.BatchRawV2
 }
 
@@ -462,14 +463,25 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	printSequences(sequences)
 
 	// Build sequence data
-	to, data, err := s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase, useBlobs)
-	if err != nil {
-		log.Errorf("[SeqSender] error estimating new sequenceBatches to add to ethtxmanager: ", err)
-		return
+	var to *common.Address
+	var data []byte
+	var sidecar *types.BlobTxSidecar
+	if !useBlobs {
+		to, data, err = s.etherman.BuildSequenceBatchesTxData(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+		if err != nil {
+			log.Errorf("[SeqSender] error estimating new sequenceBatches as CallData to add to ethtxmanager: ", err)
+			return
+		}
+	} else {
+		to, data, sidecar, err = s.etherman.BuildSequenceBatchesTxBlob(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+		if err != nil {
+			log.Errorf("[SeqSender] error estimating new sequenceBatches as Blobs to add to ethtxmanager: ", err)
+			return
+		}
 	}
 
 	// Add sequence tx
-	err = s.sendTx(ctx, false, nil, to, firstSequence.BatchNumber, lastSequence.BatchNumber, data)
+	err = s.sendTx(ctx, false, nil, to, firstSequence.BatchNumber, lastSequence.BatchNumber, data, sidecar)
 	if err != nil {
 		return
 	}
@@ -479,7 +491,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 }
 
 // sendTx adds transaction to the ethTxManager to send it to L1
-func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *common.Hash, to *common.Address, fromBatch uint64, toBatch uint64, data []byte) error {
+func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *common.Hash, to *common.Address, fromBatch uint64, toBatch uint64, data []byte, sidecar *types.BlobTxSidecar) error {
 	// Params if new tx to send or resend a previous tx
 	var paramTo *common.Address
 	var paramNonce *uint64
@@ -510,7 +522,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	}
 
 	// Add sequence tx
-	txHash, err := s.ethTxManager.Add(ctx, paramTo, paramNonce, big.NewInt(0), paramData, nil)
+	txHash, err := s.ethTxManager.Add(ctx, paramTo, paramNonce, big.NewInt(0), paramData, sidecar)
 	if err != nil {
 		log.Errorf("[SeqSender] error adding sequence to ethtxmanager: %v", err)
 		return err
@@ -552,12 +564,12 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 }
 
 // getSequencesToSend generates sequences to be sent to L1. Empty array means there are no sequences to send or it's not worth sending
-func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, bool, error) {
+func (s *SequenceSender) getSequencesToSend() ([]ethmanTypes.Sequence, bool, error) {
 	// Add sequences until too big for a single L1 tx or last batch is reached
 	s.mutexSequence.Lock()
 	defer s.mutexSequence.Unlock()
 	useBlobs := false
-	sequences := []types.Sequence{}
+	sequences := []ethmanTypes.Sequence{}
 	for i := 0; i < len(s.sequenceList); i++ {
 		batchNumber := s.sequenceList[i]
 		if batchNumber <= s.latestVirtualBatch || batchNumber <= s.latestSentToL1Batch {
@@ -629,7 +641,7 @@ func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, bool, error) {
 }
 
 // handleEstimateGasSendSequenceErr handles an error on the estimate gas. Results: (nil,nil)=requires waiting, (nil,error)=no handled gracefully, (seq,nil) handled gracefully
-func (s *SequenceSender) handleEstimateGasSendSequenceErr(sequences []types.Sequence, currentBatchNumToSequence uint64, err error) ([]types.Sequence, error) {
+func (s *SequenceSender) handleEstimateGasSendSequenceErr(sequences []ethmanTypes.Sequence, currentBatchNumToSequence uint64, err error) ([]ethmanTypes.Sequence, error) {
 	// Insufficient allowance
 	if errors.Is(err, etherman.ErrInsufficientAllowance) {
 		return nil, err
@@ -828,7 +840,7 @@ func (s *SequenceSender) addNewSequenceBatch(l2BlockStart state.DSL2BlockStart) 
 	}
 
 	// Create sequence
-	sequence := types.Sequence{
+	sequence := ethmanTypes.Sequence{
 		GlobalExitRoot:       l2BlockStart.GlobalExitRoot,
 		LastL2BLockTimestamp: l2BlockStart.Timestamp,
 		BatchNumber:          l2BlockStart.BatchNumber,
@@ -966,7 +978,7 @@ func (s *SequenceSender) logFatalf(template string, args ...interface{}) {
 }
 
 // printSequences prints data from slice of type sequences
-func printSequences(sequences []types.Sequence) {
+func printSequences(sequences []ethmanTypes.Sequence) {
 	for i, seq := range sequences {
 		log.Debugf("[SeqSender] // sequence(%d): batch: %d, ts: %v, lenData: %d, GER: %x..", i, seq.BatchNumber, seq.LastL2BLockTimestamp, len(seq.BatchL2Data), seq.GlobalExitRoot[:8])
 	}
