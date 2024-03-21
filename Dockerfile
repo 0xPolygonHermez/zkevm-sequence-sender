@@ -23,13 +23,14 @@ RUN cd /src && make build
 # CONTAINER FOR RUNNING BINARY
 FROM alpine:3.19.0
 
-COPY --from=build /src/dist/zkevm-seqsender /app/zkevm-seqsender
-COPY --from=build /src/config/environments/testnet/app.config.toml /app/sample.config.toml
-
 ARG USER=seqsender
-ENV HOME /home/$USER
 RUN adduser -D $USER
 USER $USER
-WORKDIR $HOME
+WORKDIR /app
 
-CMD ["/bin/sh", "-c", "/app/zkevm-seqsender run"]
+COPY --from=build --chown=$USER --chmod=100 /src/dist/zkevm-seqsender .
+
+RUN mkdir -p data && chown $USER. data
+VOLUME ["/app/data"]
+
+CMD ["/app/zkevm-seqsender run"]
