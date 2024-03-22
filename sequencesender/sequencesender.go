@@ -459,7 +459,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	sequenceCount := len(sequences)
 	firstSequence := sequences[0]
 	lastSequence := sequences[sequenceCount-1]
-	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
+	log.Infof("[SeqSender] sending sequences to L1 (using BLOB? %t): from batch %d to %d", useBlobs, firstSequence.BatchNumber, lastSequence.BatchNumber)
 	printSequences(sequences)
 
 	// Build sequence data
@@ -596,11 +596,13 @@ func (s *SequenceSender) getSequencesToSend() ([]ethmanTypes.Sequence, bool, err
 
 		// Check if can be send
 		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-		useBlobs = tx.Type() == BLOB_TX_TYPE
+		if err == nil {
+			useBlobs = tx.Type() == BLOB_TX_TYPE
 
-		if err == nil && !useBlobs && tx.Size() > s.cfg.MaxTxSizeForL1 {
-			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
-			err = ErrOversizedData
+			if !useBlobs && tx.Size() > s.cfg.MaxTxSizeForL1 {
+				log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
+				err = ErrOversizedData
+			}
 		}
 
 		if err != nil {
@@ -610,8 +612,10 @@ func (s *SequenceSender) getSequencesToSend() ([]ethmanTypes.Sequence, bool, err
 				if len(sequences) > 0 {
 					// Handling the error gracefully, re-processing the sequence as a sanity check
 					lastSequence = sequences[len(sequences)-1]
-					_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-					useBlobs = tx.Type() == BLOB_TX_TYPE
+					tx, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, uint64(lastSequence.LastL2BLockTimestamp), firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+					if err == nil {
+						useBlobs = tx.Type() == BLOB_TX_TYPE
+					}
 					return sequences, useBlobs, err
 				}
 			}
@@ -670,7 +674,8 @@ func (s *SequenceSender) handleEstimateGasSendSequenceErr(sequences []ethmanType
 func isDataForEthTxTooBig(err error) bool {
 	return errors.Is(err, etherman.ErrGasRequiredExceedsAllowance) ||
 		errors.Is(err, ErrOversizedData) ||
-		errors.Is(err, etherman.ErrContentLengthTooLarge)
+		errors.Is(err, etherman.ErrContentLengthTooLarge) ||
+		errors.Is(err, etherman.ErrBlobOversizedData)
 }
 
 // loadSentSequencesTransactions loads the file into the memory structure

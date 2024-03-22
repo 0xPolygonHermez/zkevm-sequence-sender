@@ -25,6 +25,11 @@ import (
 	"github.com/holiman/uint256"
 )
 
+var (
+	// ErrBlobOversizedData when blob data is longer than allowed
+	ErrBlobOversizedData = errors.New("blob data longer than allowed")
+)
+
 type ethereumClient interface {
 	ethereum.ChainReader
 	ethereum.ChainStateReader
@@ -125,6 +130,9 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	var blobBytes []byte
 	for _, seq := range sequences {
 		blobBytes = append(blobBytes, seq.BatchL2Data...)
+		blobBytes = append(blobBytes, seq.GlobalExitRoot[:]...)
+		blobBytes = binary.BigEndian.AppendUint64(blobBytes, uint64(seq.ForcedBatchTimestamp))
+		blobBytes = append(blobBytes, seq.PrevBlockHash[:]...)
 	}
 	blob, err := encodeBlobData(blobBytes)
 	if err != nil {
@@ -157,7 +165,7 @@ func (etherMan *Client) EstimateGasSequenceBatches(sender common.Address, sequen
 	log.Infof(">> tx BLOB cost: %9d Gwei = %d blobGas x %d blobGasPrice", estimateBlobCost/GWEI_DIV, blobTx.BlobGas(), blobFeeCap.Uint64())
 
 	// Return the cheapest one
-	if estimateBlobCost*100000 < estimateDataCost {
+	if estimateBlobCost < estimateDataCost {
 		return blobTx, nil
 	} else {
 		return tx, nil
@@ -287,7 +295,8 @@ func (etherMan *Client) sequenceBatchesBlob(opts bind.TransactOpts, sequences []
 		log.Errorf("error getting abi: %v", err)
 		return nil, err
 	}
-	input, err := a.Pack("sequenceBatches", []polygonzkevm.PolygonRollupBaseEtrogBatchData{}, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	input, err := a.Pack("sequenceBatches", batches, maxSequenceTimestamp, lastSequencedBatchNumber, l2Coinbase)
+	// input, err := a.Pack("pol")
 	if err != nil {
 		log.Errorf("error packing call: %v", err)
 		return nil, err
@@ -431,7 +440,7 @@ func encodeBlobData(data []byte) (kzg4844.Blob, error) {
 	dataLen := len(data)
 	if dataLen > params.BlobTxFieldElementsPerBlob*(params.BlobTxBytesPerFieldElement-1) {
 		log.Infof("blob data longer than allowed (length: %v, limit: %v)", dataLen, params.BlobTxFieldElementsPerBlob*(params.BlobTxBytesPerFieldElement-1))
-		return kzg4844.Blob{}, errors.New("blob data longer than allowed")
+		return kzg4844.Blob{}, ErrBlobOversizedData
 	}
 
 	// 1 Blob = 4096 Field elements x 32 bytes/field element = 128 KB
