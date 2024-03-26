@@ -882,6 +882,9 @@ func (s *SequenceSender) addNewBatchL2Block(l2BlockStart state.DSL2BlockStart) {
 		// Fill in data
 		blockRaw.DeltaTimestamp = l2BlockStart.DeltaTimestamp
 		blockRaw.IndexL1InfoTree = l2BlockStart.L1InfoTreeIndex
+
+		// Update LastL2BlockTimeStamp with the L2 block timestamp as maybe this is the last L2 block in the batch
+		data.batch.LastL2BLockTimestamp = l2BlockStart.Timestamp
 	}
 
 	s.mutexSequence.Unlock()
