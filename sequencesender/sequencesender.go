@@ -2,7 +2,6 @@ package sequencesender
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,8 +158,17 @@ func (s *SequenceSender) Start(ctx context.Context) {
 
 	// Set starting point of the streaming
 	s.fromStreamBatch = s.latestVirtualBatch
-	bookmark := []byte{state.BookMarkTypeBatch}
-	bookmark = binary.BigEndian.AppendUint64(bookmark, s.fromStreamBatch)
+
+	bookmark := &datastream.BookMark{
+		Type:  datastream.BookmarkType_BOOKMARK_TYPE_BATCH,
+		Value: s.fromStreamBatch,
+	}
+
+	marshalledBookmark, err := proto.Marshal(bookmark)
+	if err != nil {
+		log.Fatalf("[SeqSender] failed to marshal bookmark, error: %v", err)
+	}
+
 	log.Infof("[SeqSender] stream client from bookmark %v", bookmark)
 
 	// Current batch to sequence
@@ -171,7 +179,7 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	go s.sequenceSending(ctx)
 
 	// Start receiving the streaming
-	err = s.streamClient.ExecCommandStartBookmark(bookmark)
+	err = s.streamClient.ExecCommandStartBookmark(marshalledBookmark)
 	if err != nil {
 		log.Fatalf("[SeqSender] failed to connect to the streaming")
 	}
