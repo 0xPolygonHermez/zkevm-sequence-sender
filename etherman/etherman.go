@@ -1625,3 +1625,12 @@ func (etherMan *Client) getAuthByAddress(addr common.Address) (bind.TransactOpts
 
 // 	return *auth, nil
 // }
+
+// GetLatestBlockHeader gets the latest block header from the ethereum
+func (etherMan *Client) GetLatestBlockHeader(ctx context.Context) (*types.Header, error) {
+	header, err := etherMan.EthClient.HeaderByNumber(ctx, big.NewInt(int64(rpc.LatestBlockNumber)))
+	if err != nil || header == nil {
+		return nil, err
+	}
+	return header, nil
+}
