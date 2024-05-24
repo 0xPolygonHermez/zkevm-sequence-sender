@@ -42,7 +42,6 @@ type SequenceSender struct {
 	sequenceData        map[uint64]*sequenceData   // All the batch data indexed by batch number
 	mutexSequence       sync.Mutex                 // Mutex to access sequenceData and sequenceList
 	ethTransactions     map[common.Hash]*ethTxData // All the eth tx sent to L1 indexed by hash
-	ethTxData           map[common.Hash][]byte     // Tx data send to or received from L1
 	mutexEthTx          sync.Mutex                 // Mutex to access ethTransactions
 	sequencesTxFile     *os.File                   // Persistence of sent transactions
 	validStream         bool                       // Not valid while receiving data before the desired batch
@@ -70,6 +69,7 @@ type ethTxData struct {
 	To              common.Address                      `json:"to"`
 	StateHistory    []string                            `json:"stateHistory"`
 	Txs             map[common.Hash]ethTxAdditionalData `json:"txs"`
+	Data            []byte                              `json:"data"`
 }
 
 type ethTxAdditionalData struct {
@@ -84,7 +84,6 @@ func New(cfg Config, etherman *etherman.Client) (*SequenceSender, error) {
 		cfg:               cfg,
 		etherman:          etherman,
 		ethTransactions:   make(map[common.Hash]*ethTxData),
-		ethTxData:         make(map[common.Hash][]byte),
 		sequenceData:      make(map[uint64]*sequenceData),
 		validStream:       false,
 		latestStreamBatch: 0,
@@ -263,7 +262,6 @@ func (s *SequenceSender) purgeEthTx(ctx context.Context) {
 				lastPurged = s.ethTransactions[toPurge[i]].Nonce
 			}
 			delete(s.ethTransactions, toPurge[i])
-			delete(s.ethTxData, toPurge[i])
 		}
 		log.Infof("[SeqSender] txs purged count: %d, fromNonce: %d, toNonce: %d", len(toPurge), firstPurged, lastPurged)
 	}
@@ -345,8 +343,8 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 
 // copyTxData copies tx data in the internal structure
 func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResults map[common.Hash]ethtxmanager.TxResult) {
-	s.ethTxData[txHash] = make([]byte, len(txData))
-	copy(s.ethTxData[txHash], txData)
+	s.ethTransactions[txHash].Data = make([]byte, len(txData))
+	copy(s.ethTransactions[txHash].Data, txData)
 
 	s.ethTransactions[txHash].Txs = make(map[common.Hash]ethTxAdditionalData, 0)
 	for hash, result := range txsResults {
@@ -402,10 +400,12 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 
 	txResult, err := s.ethTxManager.Result(ctx, txHash)
 	if err == ethtxmanager.ErrNotFound {
-		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager. Marking it", txHash)
-		txData.OnMonitor = false
-		// Resend tx?
-		// _ = s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
+		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager. Resend it!", txHash)
+		// Resend tx
+		errSend := s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
+		if errSend == nil {
+			txData.OnMonitor = false
+		}
 	} else if err != nil {
 		log.Errorf("[SeqSender] error getting result for tx %v: %v", txHash, err)
 		return err
@@ -545,7 +545,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 		}
 		paramTo = &s.ethTransactions[*txOldHash].To
 		paramNonce = &s.ethTransactions[*txOldHash].Nonce
-		paramData = s.ethTxData[*txOldHash]
+		paramData = s.ethTransactions[*txOldHash].Data
 		valueFromBatch = s.ethTransactions[*txOldHash].FromBatch
 		valueToBatch = s.ethTransactions[*txOldHash].ToBatch
 	}
