@@ -128,12 +128,9 @@ func (s *SequenceSender) Start(ctx context.Context) {
 	go s.ethTxManager.Start()
 
 	// Get current nonce
-	var err error
-	s.currentNonce, err = s.etherman.CurrentNonce(ctx, s.cfg.L2Coinbase)
+	err := s.updateCurrentNonce(ctx)
 	if err != nil {
-		log.Fatalf("[SeqSender] failed to get current nonce from %v, error: %v", s.cfg.L2Coinbase, err)
-	} else {
-		log.Infof("[SeqSender] current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
+		log.Fatalf("[SeqSender] failed to get initial current nonce from %v", s.cfg.L2Coinbase)
 	}
 
 	// Get latest virtual state batch from L1
@@ -400,12 +397,12 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 
 	txResult, err := s.ethTxManager.Result(ctx, txHash)
 	if err == ethtxmanager.ErrNotFound {
-		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager. Resend it!", txHash)
+		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager", txHash)
 		// Resend tx
-		errSend := s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
-		if errSend == nil {
-			txData.OnMonitor = false
-		}
+		// errSend := s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
+		// if errSend == nil {
+		// 	txData.OnMonitor = false
+		// }
 	} else if err != nil {
 		log.Errorf("[SeqSender] error getting result for tx %v: %v", txHash, err)
 		return err
@@ -697,6 +694,19 @@ func (s *SequenceSender) handleEstimateGasSendSequenceErr(sequences []types.Sequ
 		sequences = nil
 	}
 	return sequences, nil
+}
+
+// updateCurrentNonce gets the current nonce from L1 and updates the field value
+func (s *SequenceSender) updateCurrentNonce(ctx context.Context) error {
+	// Get current nonce
+	nonce, err := s.etherman.CurrentNonce(ctx, s.cfg.L2Coinbase)
+	if err != nil {
+		log.Warnf("[SeqSender] failed to get current nonce from %v, error: %v", s.cfg.L2Coinbase, err)
+	} else {
+		s.currentNonce = nonce
+		log.Infof("[SeqSender] current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
+	}
+	return err
 }
 
 // isDataForEthTxTooBig checks if tx oversize error
