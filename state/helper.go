@@ -278,46 +278,6 @@ func DecodeTx(encodedTx string) (*types.Transaction, error) {
 	return tx, nil
 }
 
-// GenerateReceipt generates a receipt from a processed transaction
-func GenerateReceipt(blockNumber *big.Int, processedTx *ProcessTransactionResponse, txIndex uint) *types.Receipt {
-	receipt := &types.Receipt{
-		Type:              uint8(processedTx.Type),
-		PostState:         processedTx.StateRoot.Bytes(),
-		CumulativeGasUsed: processedTx.GasUsed,
-		BlockNumber:       blockNumber,
-		GasUsed:           processedTx.GasUsed,
-		TxHash:            processedTx.Tx.Hash(),
-		TransactionIndex:  txIndex,
-		ContractAddress:   processedTx.CreateAddress,
-		Logs:              processedTx.Logs,
-	}
-
-	if processedTx.EffectiveGasPrice != "" {
-		effectiveGasPrice, ok := big.NewInt(0).SetString(processedTx.EffectiveGasPrice, 0)
-		if !ok {
-			log.Errorf("error converting effective gas price %s to big.Int", processedTx.EffectiveGasPrice)
-		}
-		receipt.EffectiveGasPrice = effectiveGasPrice
-	}
-
-	// TODO: this fix is temporary while the Executor is returning a
-	// different Tx hash for the TxHash, Log.TxHash and Tx.Hash().
-	// At the moment, the processedTx.TxHash and Log[n].TxHash are
-	// returning a different hash than the Hash of the transaction
-	// sent to be processed by the Executor.
-	// The processedTx.Tx.Hash() is correct.
-	for i := 0; i < len(receipt.Logs); i++ {
-		receipt.Logs[i].TxHash = processedTx.Tx.Hash()
-	}
-	if processedTx.RomError == nil {
-		receipt.Status = types.ReceiptStatusSuccessful
-	} else {
-		receipt.Status = types.ReceiptStatusFailed
-	}
-
-	return receipt
-}
-
 // IsPreEIP155Tx checks if the tx is a tx that has a chainID as zero and
 // V field is either 27 or 28
 func IsPreEIP155Tx(tx types.Transaction) bool {
