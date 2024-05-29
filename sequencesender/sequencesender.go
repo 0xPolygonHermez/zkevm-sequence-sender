@@ -399,10 +399,10 @@ func (s *SequenceSender) getResultAndUpdateEthTx(ctx context.Context, txHash com
 	if err == ethtxmanager.ErrNotFound {
 		log.Infof("[SeqSender] transaction %v does not exist in ethtxmanager", txHash)
 		// Resend tx
-		// errSend := s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
-		// if errSend == nil {
-		// 	txData.OnMonitor = false
-		// }
+		errSend := s.sendTx(ctx, true, &txHash, nil, 0, 0, nil)
+		if errSend == nil {
+			txData.OnMonitor = false
+		}
 	} else if err != nil {
 		log.Errorf("[SeqSender] error getting result for tx %v: %v", txHash, err)
 		return err
