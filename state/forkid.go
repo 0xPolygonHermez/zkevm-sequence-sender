@@ -10,12 +10,3 @@ const (
 	// FORKID_ETROG is the fork id 7
 	FORKID_ETROG = 7
 )
-
-// ForkIDInterval is a fork id interval
-type ForkIDInterval struct {
-	FromBatchNumber uint64
-	ToBatchNumber   uint64
-	ForkId          uint64
-	Version         string
-	BlockNumber     uint64
-}
