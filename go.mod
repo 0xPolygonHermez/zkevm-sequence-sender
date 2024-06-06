@@ -8,8 +8,6 @@ require (
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/hermeznetwork/tracerr v0.3.2
 	github.com/invopop/jsonschema v0.12.0
-	github.com/jackc/pgconn v1.14.1 // indirect
-	github.com/jackc/pgx/v4 v4.18.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/prometheus/common v0.45.0
@@ -21,7 +19,7 @@ require (
 	golang.org/x/crypto v0.18.0
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/sync v0.5.0 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
@@ -66,17 +64,10 @@ require (
 	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
-	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
-	github.com/jackc/pgio v1.0.0 // indirect
-	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgproto3/v2 v2.3.2 // indirect
-	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/jackc/pgtype v1.14.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/klauspost/compress v1.17.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/lib/pq v1.10.7 // indirect
 	github.com/logrusorgru/aurora v0.0.0-20181002194514-a7b3b318ed4e // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -100,7 +91,6 @@ require (
 	github.com/sagikazarmark/locafero v0.3.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
-	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/cast v1.5.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect

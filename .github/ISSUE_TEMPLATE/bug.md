@@ -1,6 +1,6 @@
 ---
 name: Report a bug
-about: Something with Polygon zkEVM SequenceSender is not working as expected
+about: Something with Polygon zkEVM Sequence Sender is not working as expected
 title: ''
 labels: 'type:bug'
 assignees: ''
