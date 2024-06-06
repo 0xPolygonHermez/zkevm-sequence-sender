@@ -1,13 +1,18 @@
-version: "3.5"
-
 services:
   zkevm-seqsender:
     container_name: zkevm-seqsender
-    restart: unless-stopped
+    restart: no
     image: zkevm-seqsender
+    build: .
     volumes:
-      - ./config/environments/${ZKEVM_NETWORK}/app.config.toml:/app/config.toml
-    command: 
+      - ./config.toml:/app/config.toml
+      - ./genesis.json:/app/genesis.json
+      - ./keystore:/app/keystore
+      - data:/app/data
+    command:
       - "/bin/sh"
       - "-c"
-      - "/app/zkevm-seqsender run --network ${ZKEVM_NETWORK} --cfg /app/config.toml --components sequence-sender"
+      - "/app/zkevm-seqsender run --cfg /app/config.toml --components sequence-sender --network custom --custom-network-file /app/genesis.json"
+
+volumes:
+  data:

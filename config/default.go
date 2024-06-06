@@ -18,6 +18,7 @@ MaxTxSizeForL1 = 131072
 L2Coinbase = "0xfa3b44587990f97ba8b6ba7e230a5f0e95d14b3d"
 PrivateKey = {Path = "./test/sequencer.keystore", Password = "testonly"}
 SequencesTxFileName = "sequencesender.json"
+GasOffset = 80000
 WaitPeriodPurgeTxFile = "15m"
 MaxPendingTx = 1
 	[SequenceSender.StreamClient]

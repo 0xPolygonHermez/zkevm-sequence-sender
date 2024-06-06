@@ -1,7 +1,7 @@
 on:
   push:
-    tags:
-    - 'v[0-9]+.[0-9]+.[0-9]+*' # this action will only run on tags that follow semver
+    branches:
+    - develop
 
 jobs:
   build:
@@ -26,8 +26,7 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v5
         with:
-          context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            hermeznetwork/zkevm-seqsender:${{ github.ref_name }}
+            hermeznetwork/zkevm-seqsender:develop

@@ -11,12 +11,13 @@ import (
 type Sequence struct {
 	GlobalExitRoot, StateRoot, LocalExitRoot common.Hash
 	AccInputHash                             common.Hash
-	LastL2BLockTimestamp                     int64
+	LastL2BLockTimestamp                     uint64
 	BatchL2Data                              []byte
 	IsSequenceTooBig                         bool
 	BatchNumber                              uint64
 	ForcedBatchTimestamp                     int64
 	PrevBlockHash                            common.Hash
+	LastCoinbase                             common.Address
 }
 
 // IsEmpty checks is sequence struct is empty

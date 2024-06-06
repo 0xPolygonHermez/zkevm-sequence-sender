@@ -86,7 +86,7 @@ type ForcedBatchRawV2 struct {
 
 // L2TxRaw is the raw representation of a L2 transaction  inside a L2 block.
 type L2TxRaw struct {
-	EfficiencyPercentage uint8             // valid always
+	EfficiencyPercentage uint32            // valid always
 	TxAlreadyEncoded     bool              // If true the tx is already encoded (data field is used)
 	Tx                   types.Transaction // valid if TxAlreadyEncoded == false
 	Data                 []byte            // valid if TxAlreadyEncoded == true
@@ -198,7 +198,7 @@ func (tx L2TxRaw) Encode(batchData []byte) ([]byte, error) {
 		}
 		batchData = append(batchData, rlpTx...)
 	}
-	batchData = append(batchData, tx.EfficiencyPercentage)
+	batchData = append(batchData, uint8(tx.EfficiencyPercentage))
 	return batchData, nil
 }
 
@@ -262,7 +262,7 @@ func DecodeForcedBatchV2(txsData []byte) (*ForcedBatchRawV2, error) {
 	for i, tx := range txs {
 		forcedBatch.Transactions = append(forcedBatch.Transactions, L2TxRaw{
 			Tx:                   tx,
-			EfficiencyPercentage: efficiencyPercentages[i],
+			EfficiencyPercentage: uint32(efficiencyPercentages[i]),
 		})
 	}
 	return &forcedBatch, nil
@@ -319,7 +319,7 @@ func DecodeTxRLP(txsData []byte, offset int) (int, *L2TxRaw, error) {
 
 	l2Tx := &L2TxRaw{
 		Tx:                   *types.NewTx(legacyTx),
-		EfficiencyPercentage: efficiencyPercentage,
+		EfficiencyPercentage: uint32(efficiencyPercentage),
 	}
 
 	return int(endPos), l2Tx, err
