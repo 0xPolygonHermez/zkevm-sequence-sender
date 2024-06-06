@@ -29,4 +29,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            hermeznetwork/zkevm-seqsender:develop
+            hermeznetwork/zkevm-sequence-sender:develop
