@@ -1609,19 +1609,11 @@ func (etherMan *Client) getAuthByAddress(addr common.Address) (bind.TransactOpts
 	return auth, nil
 }
 
-// generateRandomAuth generates an authorization instance from a
-// randomly generated private key to be used to estimate gas for PoE
-// operations NOT restricted to the Trusted Sequencer
-// func (etherMan *Client) generateRandomAuth() (bind.TransactOpts, error) {
-// 	privateKey, err := crypto.GenerateKey()
-// 	if err != nil {
-// 		return bind.TransactOpts{}, errors.New("failed to generate a private key to estimate L1 txs")
-// 	}
-// 	chainID := big.NewInt(0).SetUint64(etherMan.l1Cfg.L1ChainID)
-// 	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
-// 	if err != nil {
-// 		return bind.TransactOpts{}, errors.New("failed to generate a fake authorization to estimate L1 txs")
-// 	}
-
-// 	return *auth, nil
-// }
+// GetLatestBlockHeader gets the latest block header from the ethereum
+func (etherMan *Client) GetLatestBlockHeader(ctx context.Context) (*types.Header, error) {
+	header, err := etherMan.EthClient.HeaderByNumber(ctx, big.NewInt(int64(rpc.LatestBlockNumber)))
+	if err != nil || header == nil {
+		return nil, err
+	}
+	return header, nil
+}

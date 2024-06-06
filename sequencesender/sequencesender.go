@@ -471,6 +471,53 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 	sequenceCount := len(sequences)
 	firstSequence := sequences[0]
 	lastSequence := sequences[sequenceCount-1]
+	lastL2BlockTimestamp := lastSequence.LastL2BLockTimestamp
+
+	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
+	printSequences(sequences)
+
+	// Wait until last L1 block timestamp is L1BlockTimestampMargin seconds above the timestamp of the last L2 block in the sequence
+	timeMargin := int64(s.cfg.L1BlockTimestampMargin.Seconds())
+	for {
+		// Get header of the last L1 block
+		lastL1BlockHeader, err := s.etherman.GetLatestBlockHeader(ctx)
+		if err != nil {
+			log.Errorf("[SeqSender] failed to get last L1 block timestamp, err: %v", err)
+			return
+		}
+
+		elapsed, waitTime := s.marginTimeElapsed(lastL2BlockTimestamp, lastL1BlockHeader.Time, timeMargin)
+
+		if !elapsed {
+			log.Infof("[SeqSender] waiting at least %d seconds to send sequences, time difference between last L1 block %d (ts: %d) and last L2 block %d (ts: %d) in the sequence is lower than %d seconds",
+				waitTime, lastL1BlockHeader.Number, lastL1BlockHeader.Time, lastSequence.BatchNumber, lastL2BlockTimestamp, timeMargin)
+			time.Sleep(time.Duration(waitTime) * time.Second)
+		} else {
+			log.Infof("[SeqSender] continuing, time difference between last L1 block %d (ts: %d) and last L2 block %d (ts: %d) in the sequence is greater than %d seconds",
+				lastL1BlockHeader.Number, lastL1BlockHeader.Time, lastSequence.BatchNumber, lastL2BlockTimestamp, timeMargin)
+			break
+		}
+	}
+
+	// Sanity check: Wait also until current time is L1BlockTimestampMargin seconds above the timestamp of the last L2 block in the sequence
+	for {
+		currentTime := uint64(time.Now().Unix())
+
+		elapsed, waitTime := s.marginTimeElapsed(lastL2BlockTimestamp, currentTime, timeMargin)
+
+		// Wait if the time difference is less than L1BlockTimestampMargin
+		if !elapsed {
+			log.Infof("[SeqSender] waiting at least %d seconds to send sequences, time difference between now (ts: %d) and last L2 block %d (ts: %d) in the sequence is lower than %d seconds",
+				waitTime, currentTime, lastSequence.BatchNumber, lastL2BlockTimestamp, timeMargin)
+			time.Sleep(time.Duration(waitTime) * time.Second)
+		} else {
+			log.Infof("[SeqSender]sending sequences now, time difference between now (ts: %d) and last L2 block %d (ts: %d) in the sequence is also greater than %d seconds",
+				currentTime, lastSequence.BatchNumber, lastL2BlockTimestamp, timeMargin)
+			break
+		}
+	}
+
+	// Send sequences to L1
 	log.Infof("[SeqSender] sending sequences to L1. From batch %d to batch %d", firstSequence.BatchNumber, lastSequence.BatchNumber)
 	printSequences(sequences)
 
@@ -1028,6 +1075,32 @@ func (s *SequenceSender) updateLatestVirtualBatch() error {
 		log.Infof("[SeqSender] latest virtual batch is %d", s.latestVirtualBatch)
 	}
 	return nil
+}
+
+// marginTimeElapsed checks if the time between currentTime and l2BlockTimestamp is greater than timeMargin.
+// If it's greater returns true, otherwise it returns false and the waitTime needed to achieve this timeMargin
+func (s *SequenceSender) marginTimeElapsed(l2BlockTimestamp uint64, currentTime uint64, timeMargin int64) (bool, int64) {
+	// Check the time difference between L2 block and currentTime
+	var timeDiff int64
+	if l2BlockTimestamp >= currentTime {
+		//L2 block timestamp is above currentTime, negative timeDiff. We do in this way to avoid uint64 overflow
+		timeDiff = int64(-(l2BlockTimestamp - currentTime))
+	} else {
+		timeDiff = int64(currentTime - l2BlockTimestamp)
+	}
+
+	// Check if the time difference is less than timeMargin (L1BlockTimestampMargin)
+	if timeDiff < timeMargin {
+		var waitTime int64
+		if timeDiff < 0 { //L2 block timestamp is above currentTime
+			waitTime = timeMargin + (-timeDiff)
+		} else {
+			waitTime = timeMargin - timeDiff
+		}
+		return false, waitTime
+	} else { // timeDiff is greater than timeMargin
+		return true, 0
+	}
 }
 
 // logFatalf logs error, activates flag to stop sequencing, and remains in an infinite loop
