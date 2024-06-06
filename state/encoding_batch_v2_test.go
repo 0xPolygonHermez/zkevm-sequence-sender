@@ -3,8 +3,8 @@ package state
 import (
 	"testing"
 
-	"github.com/0xPolygonHermez/zkevm-node/hex"
-	"github.com/0xPolygonHermez/zkevm-node/log"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/hex"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/stretchr/testify/require"
 )
 

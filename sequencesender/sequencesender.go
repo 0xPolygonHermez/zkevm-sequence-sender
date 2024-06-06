@@ -296,7 +296,7 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 		// Count if it is not in a final state
 		if s.ethTransactions[hash].OnMonitor &&
 			txStatus != ethtxmanager.MonitoredTxStatusFailed.String() &&
-			txStatus != ethtxmanager.MonitoredTxStatusConsolidated.String() &&
+			txStatus != ethtxmanager.MonitoredTxStatusSafe.String() &&
 			txStatus != ethtxmanager.MonitoredTxStatusFinalized.String() {
 			txPending++
 		}
@@ -383,7 +383,7 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 		txData.StateHistory = append(txData.StateHistory, stTrans)
 
 		// Manage according to the state
-		statusConsolidated := txData.Status == ethtxmanager.MonitoredTxStatusConsolidated.String() || txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String()
+		statusConsolidated := txData.Status == ethtxmanager.MonitoredTxStatusSafe.String() || txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String()
 		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
 			s.logFatalf("[SeqSender] transaction %v result failed!")
 		} else if statusConsolidated && txData.ToBatch >= s.latestVirtualBatch {
@@ -1035,9 +1035,9 @@ func (s *SequenceSender) addNewBlockTx(l2Tx *datastream.Transaction) {
 	}
 
 	l2TxRaw := state.L2TxRaw{
-		EfficiencyPercentage: l2Tx.EffectiveGasPricePercentage,
+		EfficiencyPercentage: uint8(l2Tx.EffectiveGasPricePercentage),
 		TxAlreadyEncoded:     false,
-		Tx:                   *tx,
+		Tx:                   tx,
 	}
 
 	// Add Tx
