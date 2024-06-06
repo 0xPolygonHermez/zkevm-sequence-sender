@@ -9,7 +9,6 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/merkletree"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/urfave/cli/v2"
@@ -24,10 +23,23 @@ type NetworkConfig struct {
 }
 
 type network string
+type leafType uint8
 
-const mainnet network = "mainnet"
-const testnet network = "testnet"
-const custom network = "custom"
+const (
+	mainnet network = "mainnet"
+	testnet network = "testnet"
+	custom  network = "custom"
+	// LeafTypeBalance specifies that leaf stores Balance
+	LeafTypeBalance leafType = 0
+	// LeafTypeNonce specifies that leaf stores Nonce
+	LeafTypeNonce leafType = 1
+	// LeafTypeCode specifies that leaf stores Code
+	LeafTypeCode leafType = 2
+	// LeafTypeStorage specifies that leaf stores Storage Value
+	LeafTypeStorage leafType = 3
+	// LeafTypeSCLength specifies that leaf stores Storage Value
+	LeafTypeSCLength leafType = 4
+)
 
 // GenesisFromJSON is the config file for network_custom
 type GenesisFromJSON struct {
@@ -128,7 +140,7 @@ func LoadGenesisFromJSONString(jsonStr string) (NetworkConfig, error) {
 		if account.Balance != "" && account.Balance != "0" {
 			action := &state.GenesisAction{
 				Address: account.Address,
-				Type:    int(merkletree.LeafTypeBalance),
+				Type:    int(LeafTypeBalance),
 				Value:   account.Balance,
 			}
 			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
@@ -136,7 +148,7 @@ func LoadGenesisFromJSONString(jsonStr string) (NetworkConfig, error) {
 		if account.Nonce != "" && account.Nonce != "0" {
 			action := &state.GenesisAction{
 				Address: account.Address,
-				Type:    int(merkletree.LeafTypeNonce),
+				Type:    int(LeafTypeNonce),
 				Value:   account.Nonce,
 			}
 			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
@@ -144,7 +156,7 @@ func LoadGenesisFromJSONString(jsonStr string) (NetworkConfig, error) {
 		if account.Bytecode != "" {
 			action := &state.GenesisAction{
 				Address:  account.Address,
-				Type:     int(merkletree.LeafTypeCode),
+				Type:     int(LeafTypeCode),
 				Bytecode: account.Bytecode,
 			}
 			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
@@ -153,7 +165,7 @@ func LoadGenesisFromJSONString(jsonStr string) (NetworkConfig, error) {
 			for storageKey, storageValue := range account.Storage {
 				action := &state.GenesisAction{
 					Address:         account.Address,
-					Type:            int(merkletree.LeafTypeStorage),
+					Type:            int(LeafTypeStorage),
 					StoragePosition: storageKey,
 					Value:           storageValue,
 				}
