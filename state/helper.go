@@ -1,13 +1,12 @@
 package state
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
 
-	"github.com/0xPolygonHermez/zkevm-node/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/hex"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
 )
@@ -16,6 +15,8 @@ const (
 	double       = 2
 	ether155V    = 27
 	etherPre155V = 35
+	// MaxEffectivePercentage is the maximum value that can be used as effective percentage
+	MaxEffectivePercentage = uint8(255)
 	// Decoding constants
 	headerByteLength uint64 = 1
 	sLength          uint64 = 32
@@ -29,29 +30,6 @@ const (
 	// EfficiencyPercentageByteLength is the length of the effective percentage in bytes
 	EfficiencyPercentageByteLength uint64 = 1
 )
-
-const (
-	// FORKID_BLUEBERRY is the fork id 4
-	FORKID_BLUEBERRY = 4
-	// FORKID_DRAGONFRUIT is the fork id 5
-	FORKID_DRAGONFRUIT = 5
-	// FORKID_INCABERRY is the fork id 6
-	FORKID_INCABERRY = 6
-	// FORKID_ETROG is the fork id 7
-	FORKID_ETROG = 7
-)
-
-var (
-	// ErrInvalidData is the error when the raw txs is unexpected
-	ErrInvalidData = errors.New("invalid data")
-)
-
-// IsPreEIP155Tx checks if the tx is a tx that has a chainID as zero and
-// V field is either 27 or 28
-func IsPreEIP155Tx(tx types.Transaction) bool {
-	v, _, _ := tx.RawSignatureValues()
-	return tx.ChainId().Uint64() == 0 && (v.Uint64() == 27 || v.Uint64() == 28)
-}
 
 func prepareRLPTxData(tx types.Transaction) ([]byte, error) {
 	v, r, s := tx.RawSignatureValues()
@@ -200,4 +178,11 @@ func DecodeTx(encodedTx string) (*types.Transaction, error) {
 		return nil, err
 	}
 	return tx, nil
+}
+
+// IsPreEIP155Tx checks if the tx is a tx that has a chainID as zero and
+// V field is either 27 or 28
+func IsPreEIP155Tx(tx types.Transaction) bool {
+	v, _, _ := tx.RawSignatureValues()
+	return tx.ChainId().Uint64() == 0 && (v.Uint64() == 27 || v.Uint64() == 28)
 }
