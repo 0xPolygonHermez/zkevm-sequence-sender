@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/dataavailabilityprotocol"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/etherscan"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/ethgasstation"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/dataavailabilityprotocol"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/oldpolygonzkevm"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/oldpolygonzkevmglobalexitroot"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/pol"
