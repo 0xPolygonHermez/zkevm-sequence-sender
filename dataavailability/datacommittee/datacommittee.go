@@ -35,8 +35,8 @@ type DataCommittee struct {
 	RequiredSignatures uint64
 }
 
-// DataCommitteeBackend implements the DAC integration
-type DataCommitteeBackend struct {
+// Backend implements the DAC integration
+type Backend struct {
 	dataCommitteeContract      *polygondatacommittee.Polygondatacommittee
 	privKey                    *ecdsa.PrivateKey
 	dataCommitteeClientFactory client.Factory
@@ -46,13 +46,13 @@ type DataCommitteeBackend struct {
 	ctx                     context.Context
 }
 
-// New creates an instance of DataCommitteeBackend
+// New creates an instance of Backend
 func New(
 	l1RPCURL string,
 	dataCommitteeAddr common.Address,
 	privKey *ecdsa.PrivateKey,
 	dataCommitteeClientFactory client.Factory,
-) (*DataCommitteeBackend, error) {
+) (*Backend, error) {
 	ethClient, err := ethclient.Dial(l1RPCURL)
 	if err != nil {
 		log.Errorf("error connecting to %s: %+v", l1RPCURL, err)
@@ -64,7 +64,7 @@ func New(
 		return nil, err
 	}
 
-	return &DataCommitteeBackend{
+	return &Backend{
 		dataCommitteeContract:      dataCommittee,
 		privKey:                    privKey,
 		dataCommitteeClientFactory: dataCommitteeClientFactory,
@@ -73,7 +73,7 @@ func New(
 }
 
 // Init loads the DAC to be cached when needed
-func (d *DataCommitteeBackend) Init() error {
+func (d *Backend) Init() error {
 	committee, err := d.getCurrentDataCommittee()
 	if err != nil {
 		return err
@@ -90,7 +90,7 @@ func (d *DataCommitteeBackend) Init() error {
 }
 
 // GetSequence gets backend data one hash at a time. This should be optimized on the DAC side to get them all at once.
-func (d *DataCommitteeBackend) GetSequence(_ context.Context, hashes []common.Hash, _ []byte) ([][]byte, error) {
+func (d *Backend) GetSequence(_ context.Context, hashes []common.Hash, _ []byte) ([][]byte, error) {
 	// TODO: optimize this on the DAC side by implementing a multi batch retrieve api)
 	var batchData [][]byte
 	for _, h := range hashes {
@@ -104,7 +104,7 @@ func (d *DataCommitteeBackend) GetSequence(_ context.Context, hashes []common.Ha
 }
 
 // GetBatchL2Data returns the data from the DAC. It checks that it matches with the expected hash
-func (d *DataCommitteeBackend) GetBatchL2Data(hash common.Hash) ([]byte, error) {
+func (d *Backend) GetBatchL2Data(hash common.Hash) ([]byte, error) {
 	intialMember := d.selectedCommitteeMember
 	found := false
 	for !found && intialMember != -1 {
@@ -154,7 +154,7 @@ type signatureMsg struct {
 
 // PostSequence sends the sequence data to the data availability backend, and returns the dataAvailabilityMessage
 // as expected by the contract
-func (s *DataCommitteeBackend) PostSequence(ctx context.Context, batchesData [][]byte) ([]byte, error) {
+func (s *Backend) PostSequence(ctx context.Context, batchesData [][]byte) ([]byte, error) {
 	// Get current committee
 	committee, err := s.getCurrentDataCommittee()
 	if err != nil {
@@ -274,7 +274,7 @@ func (s signatureMsgs) Less(i, j int) bool {
 func (s signatureMsgs) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 // getCurrentDataCommittee return the currently registered data committee
-func (d *DataCommitteeBackend) getCurrentDataCommittee() (*DataCommittee, error) {
+func (d *Backend) getCurrentDataCommittee() (*DataCommittee, error) {
 	addrsHash, err := d.dataCommitteeContract.CommitteeHash(&bind.CallOpts{Pending: false})
 	if err != nil {
 		return nil, fmt.Errorf("error getting CommitteeHash from L1 SC: %w", err)
@@ -296,7 +296,7 @@ func (d *DataCommitteeBackend) getCurrentDataCommittee() (*DataCommittee, error)
 }
 
 // getCurrentDataCommitteeMembers return the currently registered data committee members
-func (d *DataCommitteeBackend) getCurrentDataCommitteeMembers() ([]DataCommitteeMember, error) {
+func (d *Backend) getCurrentDataCommitteeMembers() ([]DataCommitteeMember, error) {
 	nMembers, err := d.dataCommitteeContract.GetAmountOfMembers(&bind.CallOpts{Pending: false})
 	if err != nil {
 		return nil, fmt.Errorf("error getting GetAmountOfMembers from L1 SC: %w", err)

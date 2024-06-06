@@ -62,7 +62,7 @@ func init() {
 
 // This function prepare the blockchain, the wallet with funds and deploy the smc
 func newTestingEnv(t *testing.T) (
-	dac *DataCommitteeBackend,
+	dac *Backend,
 	ethBackend *simulated.Backend,
 	auth *bind.TransactOpts,
 	da *polygondatacommittee.Polygondatacommittee,
@@ -86,7 +86,7 @@ func newTestingEnv(t *testing.T) (
 // NewSimulatedEtherman creates an etherman that uses a simulated blockchain. It's important to notice that the ChainID of the auth
 // must be 1337. The address that holds the auth will have an initial balance of 10 ETH
 func newSimulatedDacman(t *testing.T, auth *bind.TransactOpts) (
-	dacman *DataCommitteeBackend,
+	dacman *Backend,
 	ethBackend *simulated.Backend,
 	da *polygondatacommittee.Polygondatacommittee,
 	err error,
@@ -94,7 +94,7 @@ func newSimulatedDacman(t *testing.T, auth *bind.TransactOpts) (
 	t.Helper()
 	if auth == nil {
 		// read only client
-		return &DataCommitteeBackend{}, nil, nil, nil
+		return &Backend{}, nil, nil, nil
 	}
 	// 10000000 ETH in wei
 	balance, _ := new(big.Int).SetString("10000000000000000000000000", 10) //nolint:gomnd
@@ -110,21 +110,21 @@ func newSimulatedDacman(t *testing.T, auth *bind.TransactOpts) (
 	// DAC Setup
 	_, _, da, err = polygondatacommittee.DeployPolygondatacommittee(auth, client.Client())
 	if err != nil {
-		return &DataCommitteeBackend{}, nil, nil, err
+		return &Backend{}, nil, nil, err
 	}
 	client.Commit()
 	_, err = da.Initialize(auth)
 	if err != nil {
-		return &DataCommitteeBackend{}, nil, nil, err
+		return &Backend{}, nil, nil, err
 	}
 	client.Commit()
 	_, err = da.SetupCommittee(auth, big.NewInt(0), []string{}, []byte{})
 	if err != nil {
-		return &DataCommitteeBackend{}, nil, nil, err
+		return &Backend{}, nil, nil, err
 	}
 	client.Commit()
 
-	c := &DataCommitteeBackend{
+	c := &Backend{
 		dataCommitteeContract: da,
 	}
 	return c, client, da, nil
