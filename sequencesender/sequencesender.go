@@ -624,23 +624,24 @@ func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
 			firstSequence := sequences[0]
 			lastSequence := sequences[len(sequences)-1]
 
-		// Check if can be send
-		tx, err := s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, lastSequence.LastL2BLockTimestamp, firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
-		if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
-			log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
-			err = ErrOversizedData
-		}
+			// Check if can be sent
+			tx, err := s.etherman.BuildSequenceBatchesTx(s.cfg.SenderAddress, sequences, lastSequence.LastL2BLockTimestamp, firstSequence.BatchNumber-1, s.cfg.L2Coinbase, nil)
+			if err == nil && tx.Size() > s.cfg.MaxTxSizeForL1 {
+				log.Infof("[SeqSender] oversized Data on TX oldHash %s (txSize %d > %d)", tx.Hash(), tx.Size(), s.cfg.MaxTxSizeForL1)
+				err = ErrOversizedData
+			}
 
-		if err != nil {
-			log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
-			sequences, err = s.handleEstimateGasSendSequenceErr(sequences, batchNumber, err)
-			if sequences != nil {
-				// Handling the error gracefully, re-processing the sequence as a sanity check
-				lastSequence = sequences[len(sequences)-1]
-				_, err = s.etherman.EstimateGasSequenceBatches(s.cfg.SenderAddress, sequences, lastSequence.LastL2BLockTimestamp, firstSequence.BatchNumber-1, s.cfg.L2Coinbase)
+			if err != nil {
+				log.Infof("[SeqSender] handling estimate gas send sequence error: %v", err)
+				sequences, err = s.handleEstimateGasSendSequenceErr(sequences, batchNumber, err)
+				if sequences != nil {
+					// Handling the error gracefully, re-processing the sequence as a sanity check
+					lastSequence = sequences[len(sequences)-1]
+					_, err = s.etherman.BuildSequenceBatchesTx(s.cfg.SenderAddress, sequences, lastSequence.LastL2BLockTimestamp, firstSequence.BatchNumber-1, s.cfg.L2Coinbase, nil)
+					return sequences, err
+				}
 				return sequences, err
 			}
-			return sequences, err
 		}
 
 		// Check if the current batch is the last before a change to a new forkid, in this case we need to close and send the sequence to L1
