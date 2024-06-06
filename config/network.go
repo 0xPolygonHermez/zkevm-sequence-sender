@@ -9,6 +9,8 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/state"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/urfave/cli/v2"
 )
 
@@ -16,13 +18,28 @@ import (
 type NetworkConfig struct {
 	// L1: Configuration related to L1
 	L1Config etherman.L1Config `json:"l1Config"`
+	// L1: Genesis of the rollup, first block number and root
+	Genesis state.Genesis
 }
 
 type network string
+type leafType uint8
 
-const mainnet network = "mainnet"
-const testnet network = "testnet"
-const custom network = "custom"
+const (
+	mainnet network = "mainnet"
+	testnet network = "testnet"
+	custom  network = "custom"
+	// LeafTypeBalance specifies that leaf stores Balance
+	LeafTypeBalance leafType = 0
+	// LeafTypeNonce specifies that leaf stores Nonce
+	LeafTypeNonce leafType = 1
+	// LeafTypeCode specifies that leaf stores Code
+	LeafTypeCode leafType = 2
+	// LeafTypeStorage specifies that leaf stores Storage Value
+	LeafTypeStorage leafType = 3
+	// LeafTypeSCLength specifies that leaf stores Storage Value
+	LeafTypeSCLength leafType = 4
+)
 
 // GenesisFromJSON is the config file for network_custom
 type GenesisFromJSON struct {
@@ -30,8 +47,25 @@ type GenesisFromJSON struct {
 	Root string `json:"root"`
 	// L1: block number of the genesis block
 	GenesisBlockNum uint64 `json:"genesisBlockNumber"`
+	// L2:  List of states contracts used to populate merkle tree at initial state
+	Genesis []genesisAccountFromJSON `json:"genesis"`
 	// L1: configuration of the network
 	L1Config etherman.L1Config
+}
+
+type genesisAccountFromJSON struct {
+	// Address of the account
+	Balance string `json:"balance"`
+	// Nonce of the account
+	Nonce string `json:"nonce"`
+	// Address of the contract
+	Address string `json:"address"`
+	// Byte code of the contract
+	Bytecode string `json:"bytecode"`
+	// Initial storage of the contract
+	Storage map[string]string `json:"storage"`
+	// Name of the contract in L1 (e.g. "PolygonZkEVMDeployer", "PolygonZkEVMBridge",...)
+	ContractName string `json:"contractName"`
 }
 
 func (cfg *Config) loadNetworkConfig(ctx *cli.Context) {
@@ -91,7 +125,54 @@ func LoadGenesisFromJSONString(jsonStr string) (NetworkConfig, error) {
 		return NetworkConfig{}, err
 	}
 
+	if len(cfgJSON.Genesis) == 0 {
+		return cfg, nil
+	}
+
 	cfg.L1Config = cfgJSON.L1Config
+	cfg.Genesis = state.Genesis{
+		BlockNumber: cfgJSON.GenesisBlockNum,
+		Root:        common.HexToHash(cfgJSON.Root),
+		Actions:     []*state.GenesisAction{},
+	}
+
+	for _, account := range cfgJSON.Genesis {
+		if account.Balance != "" && account.Balance != "0" {
+			action := &state.GenesisAction{
+				Address: account.Address,
+				Type:    int(LeafTypeBalance),
+				Value:   account.Balance,
+			}
+			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
+		}
+		if account.Nonce != "" && account.Nonce != "0" {
+			action := &state.GenesisAction{
+				Address: account.Address,
+				Type:    int(LeafTypeNonce),
+				Value:   account.Nonce,
+			}
+			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
+		}
+		if account.Bytecode != "" {
+			action := &state.GenesisAction{
+				Address:  account.Address,
+				Type:     int(LeafTypeCode),
+				Bytecode: account.Bytecode,
+			}
+			cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
+		}
+		if len(account.Storage) > 0 {
+			for storageKey, storageValue := range account.Storage {
+				action := &state.GenesisAction{
+					Address:         account.Address,
+					Type:            int(LeafTypeStorage),
+					StoragePosition: storageKey,
+					Value:           storageValue,
+				}
+				cfg.Genesis.Actions = append(cfg.Genesis.Actions, action)
+			}
+		}
+	}
 
 	return cfg, nil
 }
