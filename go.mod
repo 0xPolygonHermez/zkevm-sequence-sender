@@ -3,7 +3,7 @@ module github.com/0xPolygonHermez/zkevm-sequence-sender
 go 1.21.3
 
 require (
-	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.2
+	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.3-0.20240527085154-ca3561dd370b
 	github.com/ethereum/go-ethereum v1.14.3
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/hermeznetwork/tracerr v0.3.2
@@ -120,7 +120,4 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
 )
 
-require (
-	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6
-	github.com/0xPolygonHermez/zkevm-node v0.5.0
-)
+require github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6
