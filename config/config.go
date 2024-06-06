@@ -25,8 +25,6 @@ const (
 	FlagAmount = "amount"
 	// FlagRemoteMT is the flag for remote-merkletree.
 	FlagRemoteMT = "remote-merkletree"
-	// FlagComponents is the flag for components.
-	FlagComponents = "components"
 	// FlagHTTPAPI is the flag for http.api.
 	FlagHTTPAPI = "http.api"
 	// FlagKeyStorePath is the path of the key store file containing the private key of the account going to sing and approve the tokens
@@ -99,7 +97,7 @@ func Load(ctx *cli.Context, loadNetworkConfig bool) (*Config, error) {
 	viper.AutomaticEnv()
 	replacer := strings.NewReplacer(".", "_")
 	viper.SetEnvKeyReplacer(replacer)
-	viper.SetEnvPrefix("ZKEVM_NODE")
+	viper.SetEnvPrefix("ZKEVM_SEQUENCE_SENDER")
 	err = viper.ReadInConfig()
 	if err != nil {
 		_, ok := err.(viper.ConfigFileNotFoundError)

@@ -17,8 +17,6 @@ const (
 )
 
 const (
-	// NODE_CONFIGFILE name to identify the node config-file
-	NODE_CONFIGFILE = "node"
 	// NETWORK_CONFIGFILE name to identify the netowk_custom (genesis) config-file
 	NETWORK_CONFIGFILE = "custom_network"
 )
@@ -48,13 +46,6 @@ var (
 		Usage:    "Automatically accepts any confirmation to execute the command",
 		Required: false,
 	}
-	componentsFlag = cli.StringSliceFlag{
-		Name:     config.FlagComponents,
-		Aliases:  []string{"co"},
-		Usage:    "List of components to run",
-		Required: false,
-		Value:    cli.NewStringSlice(SEQUENCE_SENDER),
-	}
 )
 
 func main() {
@@ -64,7 +55,6 @@ func main() {
 	flags := []cli.Flag{
 		&configFileFlag,
 		&yesFlag,
-		&componentsFlag,
 	}
 	app.Commands = []*cli.Command{
 		{
