@@ -11,6 +11,7 @@ Level = "info"
 Outputs = ["stderr"]
 
 [SequenceSender]
+Mode = "rollup"
 WaitPeriodSendSequence = "15s"
 LastBatchVirtualizationTimeMaxWaitPeriod = "10s"
 MaxTxSizeForL1 = 131072

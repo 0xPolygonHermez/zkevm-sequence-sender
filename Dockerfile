@@ -7,17 +7,7 @@ COPY go.mod go.sum /src/
 RUN cd /src && go mod download
 
 # BUILD BINARY
-COPY cmd /src/cmd
-COPY sequencesender /src/sequencesender
-COPY etherman /src/etherman
-COPY hex /src/hex
-COPY state /src/state
-COPY encoding /src/encoding
-COPY l1infotree /src/l1infotree
-COPY merkletree /src/merkletree
-COPY log /src/log
-COPY config /src/config
-COPY Makefile version.mk version.go /src/
+COPY . /src
 RUN cd /src && make build
 
 # CONTAINER FOR RUNNING BINARY

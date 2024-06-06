@@ -10,7 +10,10 @@ import (
 
 type ethermaner interface {
 	CurrentNonce(ctx context.Context, account common.Address) (uint64, error)
-	BuildSequenceBatchesTxData(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address) (to *common.Address, data []byte, err error)
-	EstimateGasSequenceBatches(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, initSequenceBatchNumber uint64, l2Coinbase common.Address) (*types.Transaction, error)
+	BuildSequenceBatchesTx(sender common.Address, sequences []ethmanTypes.Sequence, maxSequenceTimestamp uint64, lastSequencedBatchNumber uint64, l2Coinbase common.Address, dataAvailabilityMessage []byte) (*types.Transaction, error)
 	GetLatestBatchNumber() (uint64, error)
+}
+
+type dataAvailabilityLayer interface {
+	PostSequence(ctx context.Context, sequences []ethmanTypes.Sequence) ([]byte, error)
 }

@@ -49,6 +49,12 @@ An example of the content of the JSON persistence file.
 ## Config
 To the existing configuration in the SequenceSender section from the Node, the following new configuration parameters have been added:
 
+The running mode of the sequence sender:
+```
+[SequenceSender]
+Mode="validium" # or "rollup"
+```
+
 Maximum number of transactions pending completion. Once this number is reached, no new transactions will be sent until one completes (that reaches the `consolidated` state):
 ```
 [SequenceSender]

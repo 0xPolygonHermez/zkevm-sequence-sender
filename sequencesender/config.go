@@ -9,6 +9,8 @@ import (
 
 // Config represents the configuration of a sequence sender
 type Config struct {
+	// Mode is the mode of the sequence sender. It can be either "validium" or "rollup".
+	Mode string `mapstructure:"Mode"`
 	// WaitPeriodSendSequence is the time the sequencer waits until
 	// trying to send a sequence to L1
 	WaitPeriodSendSequence types.Duration `mapstructure:"WaitPeriodSendSequence"`
@@ -58,6 +60,14 @@ type Config struct {
 
 	// Log is the log configuration
 	Log log.Config `mapstructure:"Log"`
+
+	// MaxBatchesForL1 is the maximum amount of batches to be sequenced in a single L1 tx
+	MaxBatchesForL1 uint64 `mapstructure:"MaxBatchesForL1"`
+}
+
+// IsValidiumMode returns true if the mode is "validium"
+func (c *Config) IsValidiumMode() bool {
+	return c.Mode == "validium"
 }
 
 // StreamClientCfg contains the data streamer's configuration properties
