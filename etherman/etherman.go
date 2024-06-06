@@ -2,9 +2,11 @@ package etherman
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/smartcontracts/dataavailabilityprotocol"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -161,6 +163,7 @@ type Client struct {
 	OldZkEVM                 *oldpolygonzkevm.Oldpolygonzkevm
 	ZkEVM                    *polygonzkevm.Polygonzkevm
 	RollupManager            *polygonrollupmanager.Polygonrollupmanager
+	DAProtocol               *dataavailabilityprotocol.Dataavailabilityprotocol
 	GlobalExitRootManager    *polygonzkevmglobalexitroot.Polygonzkevmglobalexitroot
 	OldGlobalExitRootManager *oldpolygonzkevmglobalexitroot.Oldpolygonzkevmglobalexitroot
 	Pol                      *pol.Pol
@@ -183,23 +186,28 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 		log.Errorf("error connecting to %s: %+v", cfg.EthermanConfig.URL, err)
 		return nil, err
 	}
+
 	// Create smc clients
 	zkevm, err := polygonzkevm.NewPolygonzkevm(l1Config.ZkEVMAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
+
 	oldZkevm, err := oldpolygonzkevm.NewOldpolygonzkevm(l1Config.RollupManagerAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
+
 	rollupManager, err := polygonrollupmanager.NewPolygonrollupmanager(l1Config.RollupManagerAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
+
 	globalExitRoot, err := polygonzkevmglobalexitroot.NewPolygonzkevmglobalexitroot(l1Config.GlobalExitRootManagerAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
+
 	pol, err := pol.NewPol(l1Config.PolAddr, ethClient)
 	if err != nil {
 		return nil, err
@@ -217,6 +225,7 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 		}
 		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
 	}
+
 	// Get RollupID
 	rollupID, err := rollupManager.RollupAddressToID(&bind.CallOpts{Pending: false}, l1Config.ZkEVMAddr)
 	if err != nil {
@@ -224,7 +233,7 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 	}
 	log.Debug("rollupID: ", rollupID)
 
-	return &Client{
+	client := &Client{
 		EthClient:             ethClient,
 		ZkEVM:                 zkevm,
 		OldZkEVM:              oldZkevm,
@@ -240,7 +249,21 @@ func NewClient(cfg Config, l1Config L1Config) (*Client, error) {
 		l1Cfg: l1Config,
 		cfg:   cfg,
 		auth:  map[common.Address]bind.TransactOpts{},
-	}, nil
+	}
+
+	if cfg.IsValidiumMode {
+		dapAddr, err := zkevm.DataAvailabilityProtocol(&bind.CallOpts{Pending: false})
+		if err != nil {
+			return nil, err
+		}
+
+		client.DAProtocol, err = dataavailabilityprotocol.NewDataavailabilityprotocol(dapAddr, ethClient)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return client, nil
 }
 
 // VerifyGenBlockNumber verifies if the genesis Block Number is valid
@@ -1589,15 +1612,15 @@ func (etherMan *Client) AddOrReplaceAuth(auth bind.TransactOpts) error {
 }
 
 // LoadAuthFromKeyStore loads an authorization from a key store file
-func (etherMan *Client) LoadAuthFromKeyStore(path, password string) (*bind.TransactOpts, error) {
-	auth, err := newAuthFromKeystore(path, password, etherMan.l1Cfg.L1ChainID)
+func (etherMan *Client) LoadAuthFromKeyStore(path, password string) (*bind.TransactOpts, *ecdsa.PrivateKey, error) {
+	auth, pk, err := newAuthFromKeystore(path, password, etherMan.l1Cfg.L1ChainID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.Infof("loaded authorization for address: %v", auth.From.String())
 	etherMan.auth[auth.From] = auth
-	return &auth, nil
+	return &auth, pk, nil
 }
 
 // newKeyFromKeystore creates an instance of a keystore key from a keystore file
@@ -1618,20 +1641,20 @@ func newKeyFromKeystore(path, password string) (*keystore.Key, error) {
 }
 
 // newAuthFromKeystore an authorization instance from a keystore file
-func newAuthFromKeystore(path, password string, chainID uint64) (bind.TransactOpts, error) {
+func newAuthFromKeystore(path, password string, chainID uint64) (bind.TransactOpts, *ecdsa.PrivateKey, error) {
 	log.Infof("reading key from: %v", path)
 	key, err := newKeyFromKeystore(path, password)
 	if err != nil {
-		return bind.TransactOpts{}, err
+		return bind.TransactOpts{}, nil, err
 	}
 	if key == nil {
-		return bind.TransactOpts{}, nil
+		return bind.TransactOpts{}, nil, nil
 	}
 	auth, err := bind.NewKeyedTransactorWithChainID(key.PrivateKey, new(big.Int).SetUint64(chainID))
 	if err != nil {
-		return bind.TransactOpts{}, err
+		return bind.TransactOpts{}, nil, err
 	}
-	return *auth, nil
+	return *auth, key.PrivateKey, nil
 }
 
 // getAuthByAddress tries to get an authorization from the authorizations map
@@ -1650,4 +1673,14 @@ func (etherMan *Client) GetLatestBlockHeader(ctx context.Context) (*types.Header
 		return nil, err
 	}
 	return header, nil
+}
+
+// GetDAProtocolAddr returns the address of the data availability protocol
+func (etherMan *Client) GetDAProtocolAddr() (common.Address, error) {
+	return etherMan.ZkEVM.DataAvailabilityProtocol(&bind.CallOpts{Pending: false})
+}
+
+// GetDAProtocolName returns the name of the data availability protocol
+func (etherMan *Client) GetDAProtocolName() (string, error) {
+	return etherMan.DAProtocol.GetProcotolName(&bind.CallOpts{Pending: false})
 }

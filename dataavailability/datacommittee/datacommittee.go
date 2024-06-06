@@ -58,10 +58,12 @@ func New(
 		log.Errorf("error connecting to %s: %+v", l1RPCURL, err)
 		return nil, err
 	}
+
 	dataCommittee, err := polygondatacommittee.NewPolygondatacommittee(dataCommitteeAddr, ethClient)
 	if err != nil {
 		return nil, err
 	}
+
 	return &DataCommitteeBackend{
 		dataCommitteeContract:      dataCommittee,
 		privKey:                    privKey,

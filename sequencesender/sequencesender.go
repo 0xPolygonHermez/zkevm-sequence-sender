@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/0xPolygonHermez/zkevm-sequence-sender/dataavailability"
 	"math"
 	"math/big"
 	"os"
@@ -51,8 +52,7 @@ type SequenceSender struct {
 	latestStreamBatch   uint64                     // Latest batch received by the streaming
 	seqSendingStopped   bool                       // If there is a critical error
 	streamClient        *datastreamer.StreamClient
-
-	da dataAvailabilityLayer
+	da                  *dataavailability.DataAvailability
 }
 
 type sequenceData struct {
@@ -81,7 +81,7 @@ type ethTxAdditionalData struct {
 }
 
 // New inits sequence sender
-func New(cfg Config, etherman *etherman.Client, da dataAvailabilityLayer) (*SequenceSender, error) {
+func New(cfg Config, etherman *etherman.Client, da *dataavailability.DataAvailability) (*SequenceSender, error) {
 	// Create sequencesender
 	s := SequenceSender{
 		cfg:               cfg,
