@@ -3,8 +3,6 @@ module github.com/0xPolygonHermez/zkevm-sequence-sender
 go 1.21.3
 
 require (
-	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.3
-	github.com/0xPolygonHermez/zkevm-node v0.5.0
 	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.2
 	github.com/ethereum/go-ethereum v1.14.3
 	github.com/google/uuid v1.5.0 // indirect
@@ -19,7 +17,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.23.0
-	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/net v0.24.0
 	golang.org/x/sync v0.7.0 // indirect
 	google.golang.org/protobuf v1.33.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -115,14 +113,28 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-require (
-	github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.4.0 // indirect
-	github.com/gorilla/websocket v1.5.1 // indirect
-	github.com/holiman/uint256 v1.2.4 // indirect
-	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
-)
+require github.com/0xPolygon/cdk-data-availability v0.0.7
 
 require (
-	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6
-	github.com/0xPolygonHermez/zkevm-node v0.5.0
+	github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.4.0 // indirect
+	github.com/didip/tollbooth/v6 v6.1.2 // indirect
+	github.com/go-gorp/gorp/v3 v3.1.0 // indirect
+	github.com/go-pkgz/expirable-cache v0.0.3 // indirect
+	github.com/gobuffalo/logger v1.0.7 // indirect
+	github.com/gobuffalo/packd v1.0.2 // indirect
+	github.com/gobuffalo/packr/v2 v2.8.3 // indirect
+	github.com/gorilla/websocket v1.5.1 // indirect
+	github.com/holiman/uint256 v1.2.4 // indirect
+	github.com/jmoiron/sqlx v1.2.0 // indirect
+	github.com/karrick/godirwalk v1.17.0 // indirect
+	github.com/markbates/errx v1.1.0 // indirect
+	github.com/markbates/oncer v1.0.0 // indirect
+	github.com/markbates/safe v1.0.1 // indirect
+	github.com/miguelmota/go-solidity-sha3 v0.1.1 // indirect
+	github.com/rubenv/sql-migrate v1.6.1 // indirect
+	github.com/sirupsen/logrus v1.9.0 // indirect
+	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
+	golang.org/x/term v0.20.0 // indirect
 )
+
+require github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6
