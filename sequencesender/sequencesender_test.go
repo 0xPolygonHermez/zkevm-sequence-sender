@@ -23,7 +23,7 @@ func TestStreamTx(t *testing.T) {
 	txTest := state.L2TxRaw{
 		EfficiencyPercentage: 129,
 		TxAlreadyEncoded:     false,
-		Tx:                   *tx1,
+		Tx:                   tx1,
 	}
 	txTestEncoded := make([]byte, 0)
 	txTestEncoded, err = txTest.Encode(txTestEncoded)
@@ -41,12 +41,12 @@ func TestStreamTx(t *testing.T) {
 					{
 						EfficiencyPercentage: 129,
 						TxAlreadyEncoded:     false,
-						Tx:                   *tx1,
+						Tx:                   tx1,
 					},
 					{
 						EfficiencyPercentage: 97,
 						TxAlreadyEncoded:     false,
-						Tx:                   *tx2,
+						Tx:                   tx2,
 					},
 				},
 			},
