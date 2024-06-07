@@ -16,8 +16,8 @@ func New(backend DABackender) (*DataAvailability, error) {
 	da := &DataAvailability{
 		backend: backend,
 	}
-	err := da.backend.Init()
-	return da, err
+
+	return da, da.backend.Init()
 }
 
 // PostSequence sends the sequence data to the data availability backend, and returns the dataAvailabilityMessage

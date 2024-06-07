@@ -82,7 +82,7 @@ func (d *Backend) Init() error {
 	if committee != nil {
 		d.committeeMembers = committee.Members
 		if len(committee.Members) > 0 {
-			selectedCommitteeMember = rand.Intn(len(committee.Members)) //nolint:gosec
+			selectedCommitteeMember = rand.Intn(len(committee.Members) - 1) //nolint:gosec
 		}
 	}
 	d.selectedCommitteeMember = selectedCommitteeMember
@@ -279,17 +279,19 @@ func (d *Backend) getCurrentDataCommittee() (*DataCommittee, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting CommitteeHash from L1 SC: %w", err)
 	}
+
 	reqSign, err := d.dataCommitteeContract.RequiredAmountOfSignatures(&bind.CallOpts{Pending: false})
 	if err != nil {
 		return nil, fmt.Errorf("error getting RequiredAmountOfSignatures from L1 SC: %w", err)
 	}
+
 	members, err := d.getCurrentDataCommitteeMembers()
 	if err != nil {
 		return nil, err
 	}
 
 	return &DataCommittee{
-		AddressesHash:      common.Hash(addrsHash),
+		AddressesHash:      addrsHash,
 		RequiredSignatures: reqSign.Uint64(),
 		Members:            members,
 	}, nil
