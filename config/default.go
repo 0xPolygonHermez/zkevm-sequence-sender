@@ -11,7 +11,7 @@ Level = "info"
 Outputs = ["stderr"]
 
 [SequenceSender]
-Mode = "rollup"
+IsValidiumMode = false
 WaitPeriodSendSequence = "15s"
 LastBatchVirtualizationTimeMaxWaitPeriod = "10s"
 L1BlockTimestampMargin = "30s"

@@ -526,7 +526,7 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 
 	// Post sequences to DA backend
 	var dataAvailabilityMessage []byte
-	if s.cfg.IsValidiumMode() {
+	if s.cfg.IsValidiumMode {
 		dataAvailabilityMessage, err = s.da.PostSequence(ctx, sequences)
 		if err != nil {
 			log.Error("error posting sequences to the data availability protocol: ", err)
@@ -662,7 +662,7 @@ func (s *SequenceSender) getSequencesToSend() ([]types.Sequence, error) {
 		// Add new sequence
 		sequences = append(sequences, batch)
 
-		if s.cfg.IsValidiumMode() {
+		if s.cfg.IsValidiumMode {
 			if len(sequences) == int(s.cfg.MaxBatchesForL1) {
 				log.Infof(
 					"[SeqSender] sequence should be sent to L1, because MaxBatchesForL1 (%d) has been reached",

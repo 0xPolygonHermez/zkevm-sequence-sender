@@ -56,7 +56,7 @@ func createSequenceSender(cfg config.Config) *sequencesender.SequenceSender {
 			},
 			HTTPHeaders: cfg.SequenceSender.EthTxManager.Etherman.HTTPHeaders,
 		},
-		IsValidiumMode: cfg.SequenceSender.IsValidiumMode(),
+		IsValidiumMode: cfg.SequenceSender.IsValidiumMode,
 	}, cfg.NetworkConfig.L1Config)
 	if err != nil {
 		log.Fatal(err)
@@ -82,7 +82,7 @@ func createSequenceSender(cfg config.Config) *sequencesender.SequenceSender {
 }
 
 func newDataAvailability(c config.Config, etherman *etherman.Client) (*dataavailability.DataAvailability, error) {
-	if !c.SequenceSender.IsValidiumMode() {
+	if !c.SequenceSender.IsValidiumMode {
 		return nil, nil
 	}
 
