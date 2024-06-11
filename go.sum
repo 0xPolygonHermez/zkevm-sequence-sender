@@ -41,10 +41,10 @@ github.com/0xPolygon/cdk-data-availability v0.0.7 h1:i5v2I8uEgHSZ5BjnJs3Dsy1XpKd
 github.com/0xPolygon/cdk-data-availability v0.0.7/go.mod h1:qF+xt2gYwBab8XPh3fr6pnNUMEJq/32rmJN0D630hmY=
 github.com/0xPolygonHermez/zkevm-data-streamer v0.2.2 h1:XRMTk+W6vtJVGVjuEznfWyNt7HkRkkuSmlN5Y6p60Sc=
 github.com/0xPolygonHermez/zkevm-data-streamer v0.2.2/go.mod h1:0QkAXcFa92mFJrCbN3UPUJGJYes851yEgYHLONnaosE=
-github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6 h1:0PZuDOHCE2QByLCCPH7J7EhkJZaNU0/Zm3hp7SxkMw0=
-github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.6/go.mod h1:/poZX0bMh8L87lcLNR+a6Kfe7MQURN84ZbWpXdnEEAw=
-github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.4.0 h1:RoEQ9IEZqr5OXP1egWbEF6urQq+frdj+17JeteMIJfA=
-github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.4.0/go.mod h1:+5qELbp9l/AsnfwMiCl51YCGfvAfaTqVwOKrmWNJoOs=
+github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.9 h1:vrAezzwTNke6NroDAltGh1k2AJ6ibmZPBsG0bCltbRc=
+github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.9/go.mod h1:pRqfLQVM3nbzdhy3buqjAgcVyNDKAXOHqTSgkwiKpic=
+github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.5.3 h1:PY7SdTyg07TmZPO+jlsMKDk4gq2rvKXGkldEH7dp7cs=
+github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.5.3/go.mod h1:fAwP9VXeKdUY7gJu6S4sus72CtPFUEB7+BYFSJYMu8s=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/DATA-DOG/go-sqlmock v1.5.1 h1:FK6RCIUSfmbnI/imIICmboyQBkOckutaa6R5YYlLZyo=
