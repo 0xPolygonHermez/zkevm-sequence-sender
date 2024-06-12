@@ -27,9 +27,8 @@ MaxPendingTx = 1
 	[SequenceSender.EthTxManager]
 		FrequencyToMonitorTxs = "1s"
 		WaitTxToBeMined = "2m"
-		ConsolidationL1ConfirmationBlocks = 30
-		FinalizationL1ConfirmationBlocks = 60
-		WaitReceiptToBeGenerated = "8s"
+		GetReceiptMaxTime = "250ms"
+		GetReceiptWaitInterval = "1s"
 		PrivateKeys = [
 			{Path = "./test/sequencer.keystore", Password = "testonly"},
 		]
@@ -37,6 +36,9 @@ MaxPendingTx = 1
 		GasPriceMarginFactor = 1
 		MaxGasPriceLimit = 0
 		PersistenceFilename = "ethtxmanager.json"
+		ReadPendingL1Txs = false
+		SafeStatusL1NumberOfBlocks = 0
+		FinalizedStatusL1NumberOfBlocks = 0
 			[SequenceSender.EthTxManager.Etherman]
 				URL = "http://127.0.0.1:8545"
 				MultiGasProvider = false
