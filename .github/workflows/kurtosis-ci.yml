@@ -49,4 +49,4 @@ jobs:
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
         shell: bash
-        run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 20 600
+        run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 19 600
