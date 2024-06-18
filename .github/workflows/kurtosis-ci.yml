@@ -1,0 +1,52 @@
+name: Kurtosis CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+jobs:
+  kurtosis-cdk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout zkevm-sequence-sender
+        uses: actions/checkout@v4
+        with:
+          path: zkevm-sequence-sender
+
+      - name: Checkout kurtosis-cdk
+        uses: actions/checkout@v4
+        with:
+          repository: 0xPolygon/kurtosis-cdk
+          ref: feat/cdk-erigon-zkevm
+          path: kurtosis-cdk
+
+      - name: Install Kurtosis CDK tools
+        uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
+
+      - name: Build docker image
+        working-directory: ./zkevm-sequence-sender
+        run: docker build -t zkevm-sequence-sender:local --file Dockerfile .
+
+      - name: Configure Kurtosis CDK
+        working-directory: ./kurtosis-cdk
+        run: |
+          yq -Y --in-place '.args.data_availability_mode = "cdk-validium"' params.yml
+          yq -Y --in-place '.args.zkevm_sequence_sender_image = "zkevm-sequence-sender:local"' params.yml
+
+      - name: Deploy Kurtosis CDK package
+        working-directory: ./kurtosis-cdk
+        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
+
+      - name: Monitor verified batches
+        working-directory: ./kurtosis-cdk
+        shell: bash
+        run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 20 600
