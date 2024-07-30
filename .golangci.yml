@@ -44,9 +44,6 @@ linters-settings:
   gocritic:
     enabled-checks:
       - ruleguard
-    settings:
-      ruleguard:
-        rules: "./gorules/rules.go"
 
 issues:
   new-from-rev: origin/develop # report only new issues with reference to develop branch
