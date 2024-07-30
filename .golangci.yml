@@ -47,7 +47,7 @@ linters-settings:
 
 issues:
   new-from-rev: origin/develop # report only new issues with reference to develop branch
-  whole-files: false
+  whole-files: true
   exclude-rules:
     - path: _test\.go
       linters:
@@ -65,4 +65,6 @@ issues:
     - EXC0014 # Comment on exported (.+) should be of the form "(.+)..."
     - EXC0015 # Should have a package comment
   exclude-dirs:
-    - tests
+    - test
+    - proto
+    - docs
