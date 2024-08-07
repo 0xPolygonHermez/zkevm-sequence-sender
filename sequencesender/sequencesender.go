@@ -51,6 +51,7 @@ type SequenceSender struct {
 	fromStreamBatch     uint64                     // Initial batch to connect to the streaming
 	latestStreamBatch   uint64                     // Latest batch received by the streaming
 	seqSendingStopped   bool                       // If there is a critical error
+	prevStreamEntry     *datastreamer.FileEntry
 	streamClient        *datastreamer.StreamClient
 	da                  *dataavailability.DataAvailability
 }
@@ -832,19 +833,44 @@ func (s *SequenceSender) saveSentSequencesTransactions(ctx context.Context) erro
 	return nil
 }
 
+func (s *SequenceSender) entryTypeToString(entryType datastream.EntryType) string {
+	switch entryType {
+	case datastream.EntryType_ENTRY_TYPE_BATCH_START:
+		return "BatchStart"
+	case datastream.EntryType_ENTRY_TYPE_L2_BLOCK:
+		return "L2Block"
+	case datastream.EntryType_ENTRY_TYPE_TRANSACTION:
+		return "Transaction"
+	case datastream.EntryType_ENTRY_TYPE_BATCH_END:
+		return "BatchEnd"
+	default:
+		return fmt.Sprintf("%d", entryType)
+	}
+}
+
 // handleReceivedDataStream manages the events received by the streaming
-func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *datastreamer.StreamClient, ss *datastreamer.StreamServer) error {
-	dsType := datastream.EntryType(e.Type)
+func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry, client *datastreamer.StreamClient, server *datastreamer.StreamServer) error {
+	dsType := datastream.EntryType(entry.Type)
+
+	var prevEntryType datastream.EntryType
+	if s.prevStreamEntry != nil {
+		prevEntryType = datastream.EntryType(s.prevStreamEntry.Type)
+	}
 
 	switch dsType {
 	case datastream.EntryType_ENTRY_TYPE_L2_BLOCK:
 		// Handle stream entry: L2Block
 		l2Block := &datastream.L2Block{}
 
-		err := proto.Unmarshal(e.Data, l2Block)
+		err := proto.Unmarshal(entry.Data, l2Block)
 		if err != nil {
 			log.Errorf("error unmarshalling L2Block: %v", err)
 			return err
+		}
+
+		if s.prevStreamEntry != nil && !(prevEntryType == datastream.EntryType_ENTRY_TYPE_BATCH_START || prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
+			log.Fatalf("unexpected L2Block entry received, entry.Number: %d, l2Block.Number: %d, prevEntry: %s, prevEntry.Number: %d",
+				entry.Number, l2Block.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
 		}
 
 		// Already virtualized
@@ -856,6 +882,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 			// Initial case after startup
 			s.addNewSequenceBatch(l2Block)
 			s.validStream = true
+			s.prevStreamEntry = entry
 		} else {
 			// Handle whether it's only a new block or also a new batch
 			if l2Block.BatchNumber > s.wipBatch {
@@ -880,14 +907,21 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 		}
 
 		l2Tx := &datastream.Transaction{}
-		err := proto.Unmarshal(e.Data, l2Tx)
+		err := proto.Unmarshal(entry.Data, l2Tx)
 		if err != nil {
 			log.Errorf("error unmarshalling Transaction: %v", err)
 			return err
 		}
 
+		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
+			log.Fatalf("unexpected Transaction entry received, entry.Number: %d, transaction.L2BlockNumber: %d, transaction.Index: %d, prevEntry: %s, prevEntry.Number: %d",
+				entry.Number, l2Tx.L2BlockNumber, l2Tx.Index, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
+		}
+
 		// Add tx data
 		s.addNewBlockTx(l2Tx)
+
+		s.prevStreamEntry = entry
 
 	case datastream.EntryType_ENTRY_TYPE_BATCH_START:
 		// Handle stream entry: BatchStart
@@ -896,38 +930,57 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 		}
 
 		batch := &datastream.BatchStart{}
-		err := proto.Unmarshal(e.Data, batch)
+		err := proto.Unmarshal(entry.Data, batch)
 		if err != nil {
 			log.Errorf("error unmarshalling BatchStart: %v", err)
+			return err
+		}
+
+		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_BATCH_END) {
+			log.Fatalf("unexpected BatchStart entry received, entry.Number: %d, batchStart.Number: %d, prevEntry.Type: %s, prevEntry.Number: %d",
+				entry.Number, batch.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
+		}
+
+		if batch.Number != s.wipBatch+1 {
+			log.Fatalf("unexpected BatchStart.Number %d received, if should be wipBatch %d+1, entry.Number: %d", s.wipBatch, batch.Number, entry.Number)
+		}
+
+		// Close current wip batch
+		err = s.closeSequenceBatch()
+		if err != nil {
+			log.Fatalf("error closing wip batch")
 			return err
 		}
 
 		// Add batch start data
 		s.addInfoSequenceBatchStart(batch)
 
+		s.prevStreamEntry = entry
+
 	case datastream.EntryType_ENTRY_TYPE_BATCH_END:
 		// Handle stream entry: BatchEnd
-		log.Infof("BatchEnd received from stream. Entry Number: %d", e.Number)
 		if !s.validStream {
 			return nil
 		}
 
 		batch := &datastream.BatchEnd{}
-		err := proto.Unmarshal(e.Data, batch)
+		err := proto.Unmarshal(entry.Data, batch)
 		if err != nil {
 			log.Errorf("error unmarshalling BatchEnd: %v", err)
 			return err
 		}
 
+		log.Infof("received BatchEnd entry from stream, batchEnd.Number: %d, entry.Number: %d", batch.Number, entry.Number)
+
+		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
+			log.Fatalf("unexpected BatchEnd entry received, entry.Number: %d, batchEnd.Number: %d, prevEntry.Type: %s, prevEntry.Number: %d",
+				entry.Number, batch.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
+		}
+
 		// Add batch end data
 		s.addInfoSequenceBatchEnd(batch)
 
-		// Close current batch
-		err = s.closeSequenceBatch()
-		if err != nil {
-			log.Fatalf("error closing wip batch")
-			return err
-		}
+		s.prevStreamEntry = entry
 	}
 
 	return nil
