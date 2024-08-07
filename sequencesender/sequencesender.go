@@ -907,6 +907,7 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 
 	case datastream.EntryType_ENTRY_TYPE_BATCH_END:
 		// Handle stream entry: BatchEnd
+		log.Infof("BatchEnd received from stream. Entry Number: %d", e.Number)
 		if !s.validStream {
 			return nil
 		}
@@ -935,6 +936,8 @@ func (s *SequenceSender) handleReceivedDataStream(e *datastreamer.FileEntry, c *
 // closeSequenceBatch closes the current batch
 func (s *SequenceSender) closeSequenceBatch() error {
 	s.mutexSequence.Lock()
+	defer s.mutexSequence.Unlock()
+
 	log.Infof("closing batch %d", s.wipBatch)
 
 	data := s.sequenceData[s.wipBatch]
@@ -949,13 +952,13 @@ func (s *SequenceSender) closeSequenceBatch() error {
 		}
 	}
 
-	s.mutexSequence.Unlock()
 	return nil
 }
 
 // addNewSequenceBatch adds a new batch to the sequence
 func (s *SequenceSender) addNewSequenceBatch(l2Block *datastream.L2Block) {
 	s.mutexSequence.Lock()
+	defer s.mutexSequence.Unlock()
 	log.Infof("...new batch, number %d", l2Block.BatchNumber)
 
 	if l2Block.BatchNumber > s.wipBatch+1 {
@@ -986,7 +989,6 @@ func (s *SequenceSender) addNewSequenceBatch(l2Block *datastream.L2Block) {
 
 	// Update wip batch
 	s.wipBatch = l2Block.BatchNumber
-	s.mutexSequence.Unlock()
 }
 
 // addInfoSequenceBatchStart adds info from the batch start
