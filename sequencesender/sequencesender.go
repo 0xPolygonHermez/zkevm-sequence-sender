@@ -887,7 +887,6 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			if l2Block.Number != prevL2Block.Number+1 {
 				log.Fatalf("unexpected L2Block number %d received, it should be %d, entry.Number: %d, prevEntry.Number: %d",
 					l2Block.Number, prevL2Block.Number+1, entry.Number, s.prevStreamEntry.Number)
-
 			}
 		}
 
