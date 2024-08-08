@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xPolygon/cdk-rpc/rpc"
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
 	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
@@ -993,6 +994,19 @@ func (s *SequenceSender) closeSequenceBatch() error {
 
 	log.Infof("closing batch %d", s.wipBatch)
 
+	// Sanity Check
+	if s.cfg.SanityCheckRPCURL != "" {
+		rpcNumberOfBlocks, err := s.getBatchNumberOfBlockFromRPC(s.wipBatch)
+		if err != nil {
+			log.Errorf("error getting batch number from RPC while trying to perform sanity check: %v", err)
+		} else {
+			dsNumberOfBlocks := len(s.sequenceData[s.wipBatch].batchRaw.Blocks)
+			if rpcNumberOfBlocks != dsNumberOfBlocks {
+				log.Fatalf("number of blocks in batch %d (%d) does not match the number of blocks in the batch from the RPC (%d)", s.wipBatch, dsNumberOfBlocks, rpcNumberOfBlocks)
+			}
+		}
+	}
+
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
 		data.batchClosed = true
@@ -1006,6 +1020,32 @@ func (s *SequenceSender) closeSequenceBatch() error {
 	}
 
 	return nil
+}
+
+func (s *SequenceSender) getBatchNumberOfBlockFromRPC(batchNumber uint64) (int, error) {
+	type zkEVMBatch struct {
+		Blocks []string `mapstructure:"blocks"`
+	}
+
+	zkEVMBatchData := zkEVMBatch{}
+
+	response, err := rpc.JSONRPCCall(s.cfg.SanityCheckRPCURL, "zkevm_getBatchByNumber", batchNumber)
+	if err != nil {
+		return 0, err
+	}
+
+	// Check if the response is an error
+	if response.Error != nil {
+		return 0, fmt.Errorf("error in the response calling zkevm_getBatchByNumber: %v", response.Error)
+	}
+
+	// Get the batch number from the response hex string
+	err = json.Unmarshal(response.Result, &zkEVMBatchData)
+	if err != nil {
+		return 0, fmt.Errorf("error unmarshalling the batch number from the response calling zkevm_getBatchByNumber: %v", err)
+	}
+
+	return len(zkEVMBatchData.Blocks), nil
 }
 
 // addNewSequenceBatch adds a new batch to the sequence
