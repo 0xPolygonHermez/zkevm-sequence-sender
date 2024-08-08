@@ -931,7 +931,7 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			return err
 		}
 
-		log.Infof("received Transaction entry, transaction.L2BlockNumber: %d, transaction.Index: %d, entry.Number: %d", l2Tx.L2BlockNumber, l2Tx.Index, entry.Number)
+		log.Debugf("received Transaction entry, tx.L2BlockNumber: %d, tx.Index: %d, entry.Number: %d", l2Tx.L2BlockNumber, l2Tx.Index, entry.Number)
 
 		// Sanity checks
 		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
@@ -1197,7 +1197,6 @@ func (s *SequenceSender) addNewBatchL2Block(l2Block *datastream.L2Block) {
 // addNewBlockTx adds a new Tx to the current L2 block
 func (s *SequenceSender) addNewBlockTx(l2Tx *datastream.Transaction) {
 	s.mutexSequence.Lock()
-	log.Debugf("........new tx, length %d EGP %d SR %x..", len(l2Tx.Encoded), l2Tx.EffectiveGasPricePercentage, l2Tx.ImStateRoot[:8])
 
 	// Current L2 block
 	_, blockRaw := s.getWipL2Block()
