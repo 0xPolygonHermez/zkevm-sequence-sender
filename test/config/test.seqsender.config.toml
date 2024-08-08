@@ -10,12 +10,12 @@ LastBatchVirtualizationTimeMaxWaitPeriod = "10s"
 L1BlockTimestampMargin = "30s"
 MaxTxSizeForL1 = 131072
 L2Coinbase = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-PrivateKey = {Path = "./test/sequencer.keystore", Password = "testonly"}
+PrivateKey = {Path = "./sequencer.keystore", Password = "testonly"}
 SequencesTxFileName = "sequencesender.json"
 GasOffset = 80000
 WaitPeriodPurgeTxFile = "60m"
 MaxPendingTx = 1
-SanityCheckRPCURL = ""
+SanityCheckRPCURL = "http://127.0.0.1:8123"
 	[SequenceSender.StreamClient]
 		Server = "127.0.0.1:6900"
 	[SequenceSender.EthTxManager]
@@ -24,7 +24,7 @@ SanityCheckRPCURL = ""
 		GetReceiptMaxTime = "250ms"
 		GetReceiptWaitInterval = "1s"
 		PrivateKeys = [
-			{Path = "./test/sequencer.keystore", Password = "testonly"},
+			{Path = "./sequencer.keystore", Password = "testonly"},
 		]
 		ForcedGas = 0
 		GasPriceMarginFactor = 1

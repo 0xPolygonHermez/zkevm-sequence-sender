@@ -61,6 +61,7 @@ type sequenceData struct {
 	batchClosed bool
 	batch       *types.Sequence
 	batchRaw    *state.BatchRawV2
+	batchType   datastream.BatchType
 }
 
 type ethTxData struct {
@@ -869,9 +870,25 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			return err
 		}
 
+		log.Infof("received L2Block entry, l2Block.Number: %d, l2Block.BatchNumber: %d, entry.Number: %d", l2Block.Number, l2Block.BatchNumber, entry.Number)
+
+		// Sanity checks
 		if s.prevStreamEntry != nil && !(prevEntryType == datastream.EntryType_ENTRY_TYPE_BATCH_START || prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
 			log.Fatalf("unexpected L2Block entry received, entry.Number: %d, l2Block.Number: %d, prevEntry: %s, prevEntry.Number: %d",
 				entry.Number, l2Block.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
+		} else if prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK {
+			prevL2Block := &datastream.L2Block{}
+
+			err := proto.Unmarshal(s.prevStreamEntry.Data, prevL2Block)
+			if err != nil {
+				log.Errorf("error unmarshalling prevL2Block: %v", err)
+				return err
+			}
+			if l2Block.Number != prevL2Block.Number+1 {
+				log.Fatalf("unexpected L2Block number %d received, it should be %d, entry.Number: %d, prevEntry.Number: %d",
+					l2Block.Number, prevL2Block.Number+1, entry.Number, s.prevStreamEntry.Number)
+
+			}
 		}
 
 		// Already virtualized
@@ -883,7 +900,6 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			// Initial case after startup
 			s.addNewSequenceBatch(l2Block)
 			s.validStream = true
-			s.prevStreamEntry = entry
 		} else {
 			// Handle whether it's only a new block or also a new batch
 			if l2Block.BatchNumber > s.wipBatch {
@@ -901,6 +917,8 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 		// Add L2 block
 		s.addNewBatchL2Block(l2Block)
 
+		s.prevStreamEntry = entry
+
 	case datastream.EntryType_ENTRY_TYPE_TRANSACTION:
 		// Handle stream entry: Transaction
 		if !s.validStream {
@@ -914,6 +932,9 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			return err
 		}
 
+		log.Infof("received Transaction entry, transaction.L2BlockNumber: %d, transaction.Index: %d, entry.Number: %d", l2Tx.L2BlockNumber, l2Tx.Index, entry.Number)
+
+		// Sanity checks
 		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
 			log.Fatalf("unexpected Transaction entry received, entry.Number: %d, transaction.L2BlockNumber: %d, transaction.Index: %d, prevEntry: %s, prevEntry.Number: %d",
 				entry.Number, l2Tx.L2BlockNumber, l2Tx.Index, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
@@ -937,20 +958,14 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			return err
 		}
 
+		log.Infof("received BatchStart entry, batchStart.Number: %d, entry.Number: %d", batch.Number, entry.Number)
+
+		// Sanity checks
 		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_BATCH_END) {
 			log.Fatalf("unexpected BatchStart entry received, entry.Number: %d, batchStart.Number: %d, prevEntry.Type: %s, prevEntry.Number: %d",
 				entry.Number, batch.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
-		}
-
-		if batch.Number != s.wipBatch+1 {
+		} else if batch.Number != s.wipBatch+1 {
 			log.Fatalf("unexpected BatchStart.Number %d received, if should be wipBatch %d+1, entry.Number: %d", s.wipBatch, batch.Number, entry.Number)
-		}
-
-		// Close current wip batch
-		err = s.closeSequenceBatch()
-		if err != nil {
-			log.Fatalf("error closing wip batch")
-			return err
 		}
 
 		// Add batch start data
@@ -971,8 +986,9 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 			return err
 		}
 
-		log.Infof("received BatchEnd entry from stream, batchEnd.Number: %d, entry.Number: %d", batch.Number, entry.Number)
+		log.Infof("received BatchEnd entry, batchEnd.Number: %d, entry.Number: %d", batch.Number, entry.Number)
 
+		// Sanity checks
 		if !(prevEntryType == datastream.EntryType_ENTRY_TYPE_L2_BLOCK || prevEntryType == datastream.EntryType_ENTRY_TYPE_TRANSACTION) {
 			log.Fatalf("unexpected BatchEnd entry received, entry.Number: %d, batchEnd.Number: %d, prevEntry.Type: %s, prevEntry.Number: %d",
 				entry.Number, batch.Number, s.entryTypeToString(prevEntryType), s.prevStreamEntry.Number)
@@ -980,6 +996,13 @@ func (s *SequenceSender) handleReceivedDataStream(entry *datastreamer.FileEntry,
 
 		// Add batch end data
 		s.addInfoSequenceBatchEnd(batch)
+
+		// Close current wip batch
+		err = s.closeSequenceBatch()
+		if err != nil {
+			log.Fatalf("error closing wip batch")
+			return err
+		}
 
 		s.prevStreamEntry = entry
 	}
@@ -994,19 +1017,6 @@ func (s *SequenceSender) closeSequenceBatch() error {
 
 	log.Infof("closing batch %d", s.wipBatch)
 
-	// Sanity Check
-	if s.cfg.SanityCheckRPCURL != "" {
-		rpcNumberOfBlocks, err := s.getBatchNumberOfBlockFromRPC(s.wipBatch)
-		if err != nil {
-			log.Errorf("error getting batch number from RPC while trying to perform sanity check: %v", err)
-		} else {
-			dsNumberOfBlocks := len(s.sequenceData[s.wipBatch].batchRaw.Blocks)
-			if rpcNumberOfBlocks != dsNumberOfBlocks {
-				log.Fatalf("number of blocks in batch %d (%d) does not match the number of blocks in the batch from the RPC (%d)", s.wipBatch, dsNumberOfBlocks, rpcNumberOfBlocks)
-			}
-		}
-	}
-
 	data := s.sequenceData[s.wipBatch]
 	if data != nil {
 		data.batchClosed = true
@@ -1017,42 +1027,67 @@ func (s *SequenceSender) closeSequenceBatch() error {
 			log.Errorf("error closing and encoding the batch %d: %v", s.wipBatch, err)
 			return err
 		}
+	} else {
+		log.Fatalf("wipBatch %d not found in sequenceData slice", s.wipBatch)
+	}
+
+	// Sanity Check
+	if s.cfg.SanityCheckRPCURL != "" {
+		rpcNumberOfBlocks, batchL2Data, err := s.getBatchFromRPC(s.wipBatch)
+		if err != nil {
+			log.Fatalf("error getting batch number from RPC while trying to perform sanity check: %v", err)
+		} else {
+			dsNumberOfBlocks := len(s.sequenceData[s.wipBatch].batchRaw.Blocks)
+			if rpcNumberOfBlocks != dsNumberOfBlocks {
+				log.Fatalf("number of blocks in batch %d (%d) does not match the number of blocks in the batch from the RPC (%d)", s.wipBatch, dsNumberOfBlocks, rpcNumberOfBlocks)
+			}
+
+			if data.batchType == datastream.BatchType_BATCH_TYPE_REGULAR && common.Bytes2Hex(data.batch.BatchL2Data) != batchL2Data {
+				log.Infof("datastream batchL2Data: %s", common.Bytes2Hex(data.batch.BatchL2Data))
+				log.Infof("RPC batchL2Data: %s", batchL2Data)
+				log.Fatalf("batchL2Data in batch %d does not match batchL2Data from the RPC (%d)", s.wipBatch)
+			}
+
+			log.Infof("sanity check of batch %d against RPC successful", s.wipBatch)
+		}
+	} else {
+		log.Warnf("config param SanityCheckRPCURL not set, sanity check with RPC can't be done")
 	}
 
 	return nil
 }
 
-func (s *SequenceSender) getBatchNumberOfBlockFromRPC(batchNumber uint64) (int, error) {
+func (s *SequenceSender) getBatchFromRPC(batchNumber uint64) (int, string, error) {
 	type zkEVMBatch struct {
-		Blocks []string `mapstructure:"blocks"`
+		Blocks      []string `mapstructure:"blocks"`
+		BatchL2Data string   `mapstructure:"batchL2Data"`
 	}
 
 	zkEVMBatchData := zkEVMBatch{}
 
 	response, err := rpc.JSONRPCCall(s.cfg.SanityCheckRPCURL, "zkevm_getBatchByNumber", batchNumber)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	// Check if the response is an error
 	if response.Error != nil {
-		return 0, fmt.Errorf("error in the response calling zkevm_getBatchByNumber: %v", response.Error)
+		return 0, "", fmt.Errorf("error in the response calling zkevm_getBatchByNumber: %v", response.Error)
 	}
 
 	// Get the batch number from the response hex string
 	err = json.Unmarshal(response.Result, &zkEVMBatchData)
 	if err != nil {
-		return 0, fmt.Errorf("error unmarshalling the batch number from the response calling zkevm_getBatchByNumber: %v", err)
+		return 0, "", fmt.Errorf("error unmarshalling the batch number from the response calling zkevm_getBatchByNumber: %v", err)
 	}
 
-	return len(zkEVMBatchData.Blocks), nil
+	return len(zkEVMBatchData.Blocks), zkEVMBatchData.BatchL2Data, nil
 }
 
 // addNewSequenceBatch adds a new batch to the sequence
 func (s *SequenceSender) addNewSequenceBatch(l2Block *datastream.L2Block) {
 	s.mutexSequence.Lock()
 	defer s.mutexSequence.Unlock()
-	log.Infof("...new batch, number %d", l2Block.BatchNumber)
 
 	if l2Block.BatchNumber > s.wipBatch+1 {
 		s.logFatalf("new batch number (%d) is not consecutive to the current one (%d)", l2Block.BatchNumber, s.wipBatch)
@@ -1096,6 +1131,7 @@ func (s *SequenceSender) addInfoSequenceBatchStart(batch *datastream.BatchStart)
 		if wipBatch.BatchNumber+1 != batch.Number {
 			s.logFatalf("batch start number (%d) does not match the current consecutive one (%d)", batch.Number, wipBatch.BatchNumber)
 		}
+		data.batchType = batch.Type
 	}
 
 	s.mutexSequence.Unlock()
@@ -1122,7 +1158,6 @@ func (s *SequenceSender) addInfoSequenceBatchEnd(batch *datastream.BatchEnd) {
 // addNewBatchL2Block adds a new L2 block to the work in progress batch
 func (s *SequenceSender) addNewBatchL2Block(l2Block *datastream.L2Block) {
 	s.mutexSequence.Lock()
-	log.Infof(".....new L2 block, number %d (batch %d)", l2Block.Number, l2Block.BatchNumber)
 
 	// Current batch
 	data := s.sequenceData[s.wipBatch]

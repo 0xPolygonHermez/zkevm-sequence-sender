@@ -65,13 +65,10 @@ build: check-go
 lint: check-go
 build-docker: check-docker
 build-docker-nc: check-docker
+run: check-docker check-docker-compose
 stop: check-docker check-docker-compose
 install-linter: check-go check-curl
-install-config-doc-gen: check-python
-config-doc-node: check-go check-python
-config-doc-custom_network: check-go check-python
 update-external-dependencies: check-go
-generate-code-from-proto: check-protoc
 
 .PHONY: build
 build: ## Builds the binary locally into ./dist
@@ -85,6 +82,10 @@ build-docker: ## Builds a docker image with the sequence sender binary
 build-docker-nc: ## Builds a docker image with the sequence sender binary - but without build cache
 	docker build --no-cache=true -t zkevm-seqsender -f ./Dockerfile .
 
+.PHONY: run
+run: ## Start docker seqsender
+	docker compose -f docker-compose.yml up -d zkevm-seqsender
+
 .PHONY: stop
 stop: ## Stops all services
 	docker-compose down
@@ -97,60 +98,9 @@ install-linter: ## Installs the linter
 lint: ## Runs the linter
 	export "GOROOT=$$(go env GOROOT)" && $$(go env GOPATH)/bin/golangci-lint run
 
-$(VENV_PYTHON):
-	rm -rf $(VENV)
-	$(SYSTEM_PYTHON) -m venv $(VENV)
-
-venv: $(VENV_PYTHON)
-
-# https://stackoverflow.com/questions/24736146/how-to-use-virtualenv-in-makefile
-.PHONY: install-config-doc-gen
-$(GENERATE_SCHEMA_DOC): $(VENV_PYTHON)
-	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install json-schema-for-humans
-
-.PHONY: config-doc-gen
-config-doc-gen: config-doc-node config-doc-custom_network ## Generate config file's json-schema for node and custom_network and documentation
-
-.PHONY: config-doc-node
-config-doc-node: $(GENERATE_SCHEMA_DOC) ## Generate config file's json-schema for node and documentation
-	go run ./cmd generate-json-schema --config-file=node --output=$(GENERATE_DOC_PATH)node-config-schema.json
-	$(GENERATE_SCHEMA_DOC) --config show_breadcrumbs=true \
-		--config footer_show_time=false \
-		--config expand_buttons=true \
-		--config custom_template_path=$(GENERATE_DOC_TEMPLATES_PATH)/js/base.html \
-		$(GENERATE_DOC_PATH)node-config-schema.json \
-		$(GENERATE_DOC_PATH)node-config-doc.html
-	$(GENERATE_SCHEMA_DOC)  --config custom_template_path=$(GENERATE_DOC_TEMPLATES_PATH)/md/base.md \
-		--config footer_show_time=false \
-		$(GENERATE_DOC_PATH)node-config-schema.json \
-		$(GENERATE_DOC_PATH)node-config-doc.md
-
-.PHONY: config-doc-custom_network
-config-doc-custom_network: $(GENERATE_SCHEMA_DOC) ## Generate config file's json-schema for custom_network and documentation
-	go run ./cmd generate-json-schema --config-file=custom_network --output=$(GENERATE_DOC_PATH)custom_network-config-schema.json
-	$(GENERATE_SCHEMA_DOC) --config show_breadcrumbs=true --config footer_show_time=false \
-		--config expand_buttons=true \
-		--config custom_template_path=$(GENERATE_DOC_TEMPLATES_PATH)/js/base.html \
-		$(GENERATE_DOC_PATH)custom_network-config-schema.json \
-		$(GENERATE_DOC_PATH)custom_network-config-doc.html
-	$(GENERATE_SCHEMA_DOC)  --config custom_template_path=$(GENERATE_DOC_TEMPLATES_PATH)/md/base.md \
-		--config footer_show_time=false \
-		--config example_format=JSON \
-		$(GENERATE_DOC_PATH)custom_network-config-schema.json \
-		$(GENERATE_DOC_PATH)custom_network-config-doc.md
-
-.PHONY: update-external-dependencies
-update-external-dependencies: ## Updates external dependencies like images, test vectors or proto files
-	go run ./scripts/cmd/... updatedeps
-
 .PHONY: install-git-hooks
 install-git-hooks: ## Moves hook files to the .git/hooks directory
 	cp .github/hooks/* .git/hooks
-
-.PHONY: generate-code-from-proto
-generate-code-from-proto: ## Generates code from proto files
-	cd proto/src/proto/datastream/v1 && protoc --proto_path=. --proto_path=../../../../include --go_out=../../../../../state/datastream --go-grpc_out=../../../../../state/datastream --go-grpc_opt=paths=source_relative --go_opt=paths=source_relative datastream.proto
 
 ## Help display.
 ## Pulls comments from beside commands and prints a nicely formatted
