@@ -589,6 +589,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	if !resend {
 		s.nonceMutex.Lock()
 		nonce := s.currentNonce
+		s.currentNonce++
 		s.nonceMutex.Unlock()
 		paramTo = to
 		paramNonce = &nonce
@@ -616,11 +617,6 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	if err != nil {
 		log.Errorf("error adding sequence to ethtxmanager: %v", err)
 		return err
-	}
-	if !resend {
-		s.nonceMutex.Lock()
-		s.currentNonce++
-		s.nonceMutex.Unlock()
 	}
 
 	// Add new eth tx
