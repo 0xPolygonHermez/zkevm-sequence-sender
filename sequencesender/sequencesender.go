@@ -36,8 +36,6 @@ type SequenceSender struct {
 	cfg                 Config
 	ethTxManager        *ethtxmanager.Client
 	etherman            *etherman.Client
-	currentNonce        uint64
-	nonceMutex          sync.Mutex
 	latestVirtualBatch  uint64                     // Latest virtualized batch obtained from L1
 	latestVirtualTime   time.Time                  // Latest virtual batch timestamp
 	latestSentToL1Batch uint64                     // Latest batch sent to L1
@@ -134,23 +132,11 @@ func New(cfg Config, etherman *etherman.Client, da *dataavailability.DataAvailab
 
 // Start starts the sequence sender
 func (s *SequenceSender) Start(ctx context.Context) {
-	s.nonceMutex.Lock()
-	defer s.nonceMutex.Unlock()
-
 	// Start ethtxmanager client
 	go s.ethTxManager.Start()
 
-	// Get current nonce
-	var err error
-	s.currentNonce, err = s.etherman.CurrentNonce(ctx, s.cfg.L2Coinbase)
-	if err != nil {
-		log.Fatalf("failed to get current nonce from %v, error: %v", s.cfg.L2Coinbase, err)
-	} else {
-		log.Infof("current nonce for %v is %d", s.cfg.L2Coinbase, s.currentNonce)
-	}
-
 	// Get latest virtual state batch from L1
-	err = s.updateLatestVirtualBatch()
+	err := s.updateLatestVirtualBatch()
 	if err != nil {
 		log.Fatalf("error getting latest sequenced batch, error: %v", err)
 	}
@@ -580,19 +566,13 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *common.Hash, to *common.Address, fromBatch uint64, toBatch uint64, data []byte, gas uint64) error {
 	// Params if new tx to send or resend a previous tx
 	var paramTo *common.Address
-	var paramNonce *uint64
 	var paramData []byte
 	var valueFromBatch uint64
 	var valueToBatch uint64
 	var valueToAddress common.Address
 
 	if !resend {
-		s.nonceMutex.Lock()
-		nonce := s.currentNonce
-		s.currentNonce++
-		s.nonceMutex.Unlock()
 		paramTo = to
-		paramNonce = &nonce
 		paramData = data
 		valueFromBatch = fromBatch
 		valueToBatch = toBatch
@@ -602,7 +582,6 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 			return errors.New("resend tx with nil hash monitor id")
 		}
 		paramTo = &s.ethTransactions[*txOldHash].To
-		paramNonce = &s.ethTransactions[*txOldHash].Nonce
 		paramData = s.ethTxData[*txOldHash]
 		valueFromBatch = s.ethTransactions[*txOldHash].FromBatch
 		valueToBatch = s.ethTransactions[*txOldHash].ToBatch
@@ -613,7 +592,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	}
 
 	// Add sequence tx
-	txHash, err := s.ethTxManager.AddWithGas(ctx, paramTo, paramNonce, big.NewInt(0), paramData, s.cfg.GasOffset, nil, gas)
+	txHash, err := s.ethTxManager.AddWithGas(ctx, paramTo, nil, big.NewInt(0), paramData, s.cfg.GasOffset, nil, gas)
 	if err != nil {
 		log.Errorf("error adding sequence to ethtxmanager: %v", err)
 		return err
