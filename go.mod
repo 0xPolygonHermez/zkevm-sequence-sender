@@ -7,7 +7,7 @@ require github.com/0xPolygon/cdk-data-availability v0.0.7
 require (
 	github.com/0xPolygon/cdk-rpc v0.0.0-20240419104226-c0a62ba0f49d
 	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.3
-	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240716105056-c051c96d0234
+	github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240918084237-8c89abf1c1cc
 	github.com/ethereum/go-ethereum v1.14.5
 	github.com/hermeznetwork/tracerr v0.3.2
 	github.com/invopop/jsonschema v0.12.0
