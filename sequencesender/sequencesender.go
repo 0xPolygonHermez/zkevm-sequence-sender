@@ -566,7 +566,6 @@ func (s *SequenceSender) tryToSendSequence(ctx context.Context) {
 func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *common.Hash, to *common.Address, fromBatch uint64, toBatch uint64, data []byte, gas uint64) error {
 	// Params if new tx to send or resend a previous tx
 	var paramTo *common.Address
-	var paramNonce *uint64
 	var paramData []byte
 	var valueFromBatch uint64
 	var valueToBatch uint64
@@ -583,7 +582,6 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 			return errors.New("resend tx with nil hash monitor id")
 		}
 		paramTo = &s.ethTransactions[*txOldHash].To
-		paramNonce = &s.ethTransactions[*txOldHash].Nonce
 		paramData = s.ethTxData[*txOldHash]
 		valueFromBatch = s.ethTransactions[*txOldHash].FromBatch
 		valueToBatch = s.ethTransactions[*txOldHash].ToBatch
@@ -594,7 +592,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	}
 
 	// Add sequence tx
-	txHash, err := s.ethTxManager.AddWithGas(ctx, paramTo, paramNonce, big.NewInt(0), paramData, s.cfg.GasOffset, nil, gas)
+	txHash, err := s.ethTxManager.AddWithGas(ctx, paramTo, big.NewInt(0), paramData, s.cfg.GasOffset, nil, gas)
 	if err != nil {
 		log.Errorf("error adding sequence to ethtxmanager: %v", err)
 		return err

@@ -55,6 +55,8 @@ github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240920090712-3ce10580
 github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240920090712-3ce105800331/go.mod h1:zBZWxwOHKlw+ghd9roQLgIkDZWA7e7qO3EsfQQT/+oQ=
 github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240925084223-2007f5947ef2 h1:BrOY+FsrOMrrmf4Khlq+WJzPdGmtx+srzkN/7fajnxc=
 github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240925084223-2007f5947ef2/go.mod h1:zBZWxwOHKlw+ghd9roQLgIkDZWA7e7qO3EsfQQT/+oQ=
+github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240930120324-65816dead447 h1:8nZjZrHZo+P9hTkhwtQ4J6eh9v4MTMtVb9jRDra8h0s=
+github.com/0xPolygonHermez/zkevm-ethtx-manager v0.1.10-0.20240930120324-65816dead447/go.mod h1:4iWpcwMOZJPapUzFB/HjTAM0X/gltHSEzQHE0lOt+eY=
 github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.5.4 h1:ovSpYnlOjraL33J61knxVGc20PHdPQaO1BCEDAqZSpg=
 github.com/0xPolygonHermez/zkevm-synchronizer-l1 v0.5.4/go.mod h1:fAwP9VXeKdUY7gJu6S4sus72CtPFUEB7+BYFSJYMu8s=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
