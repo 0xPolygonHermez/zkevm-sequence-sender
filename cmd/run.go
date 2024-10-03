@@ -9,8 +9,8 @@ import (
 	"runtime"
 
 	dataCommitteeClient "github.com/0xPolygon/cdk-data-availability/client"
-	ethtxman "github.com/0xPolygonHermez/zkevm-ethtx-manager/etherman"
-	"github.com/0xPolygonHermez/zkevm-ethtx-manager/etherman/etherscan"
+	ethtxman "github.com/0xPolygon/zkevm-ethtx-manager/etherman"
+	"github.com/0xPolygon/zkevm-ethtx-manager/etherman/etherscan"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/config"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/dataavailability"

@@ -161,7 +161,6 @@ func (s *Backend) PostSequence(ctx context.Context, batchesData [][]byte) ([]byt
 		return nil, err
 	}
 
-	// Authenticate as trusted sequencer by signing the sequence
 	sequence := make(daTypes.Sequence, 0, len(batchesData))
 	for _, batchData := range batchesData {
 		sequence = append(sequence, batchData)
@@ -175,7 +174,12 @@ func (s *Backend) PostSequence(ctx context.Context, batchesData [][]byte) ([]byt
 	ch := make(chan signatureMsg, len(committee.Members))
 	signatureCtx, cancelSignatureCollection := context.WithCancel(ctx)
 	for _, member := range committee.Members {
-		go requestSignatureFromMember(signatureCtx, *signedSequence, member, ch)
+		signedSequence := daTypes.SignedSequence{
+			Sequence:  sequence,
+			Signature: signedSequence,
+		}
+
+		go requestSignatureFromMember(signatureCtx, signedSequence, member, ch)
 	}
 
 	// Collect signatures
@@ -216,7 +220,7 @@ func requestSignatureFromMember(ctx context.Context, signedSequence daTypes.Sign
 	// request
 	c := client.New(member.URL)
 	log.Infof("sending request to sign the sequence to %s at %s", member.Addr.Hex(), member.URL)
-	signature, err := c.SignSequence(signedSequence)
+	signature, err := c.SignSequence(ctx, signedSequence)
 	if err != nil {
 		ch <- signatureMsg{
 			addr: member.Addr,

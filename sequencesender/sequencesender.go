@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/0xPolygon/cdk-rpc/rpc"
+	"github.com/0xPolygon/zkevm-ethtx-manager/ethtxmanager"
+	ethtxlog "github.com/0xPolygon/zkevm-ethtx-manager/log"
+	ethtxtypes "github.com/0xPolygon/zkevm-ethtx-manager/types"
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
-	ethtxlog "github.com/0xPolygonHermez/zkevm-ethtx-manager/log"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/dataavailability"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/etherman/types"
@@ -244,7 +245,7 @@ func (s *SequenceSender) purgeEthTx(ctx context.Context) {
 			continue
 		}
 
-		if !data.OnMonitor || data.Status == ethtxmanager.MonitoredTxStatusFinalized.String() {
+		if !data.OnMonitor || data.Status == ethtxtypes.MonitoredTxStatusFinalized.String() {
 			toPurge = append(toPurge, hash)
 
 			// Remove from tx monitor
@@ -283,7 +284,7 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 	var txPending uint64
 	var txSync uint64
 	for hash, data := range s.ethTransactions {
-		if data.Status == ethtxmanager.MonitoredTxStatusFinalized.String() {
+		if data.Status == ethtxtypes.MonitoredTxStatusFinalized.String() {
 			continue
 		}
 
@@ -292,9 +293,9 @@ func (s *SequenceSender) syncEthTxResults(ctx context.Context) (uint64, error) {
 		txStatus := s.ethTransactions[hash].Status
 		// Count if it is not in a final state
 		if s.ethTransactions[hash].OnMonitor &&
-			txStatus != ethtxmanager.MonitoredTxStatusFailed.String() &&
-			txStatus != ethtxmanager.MonitoredTxStatusSafe.String() &&
-			txStatus != ethtxmanager.MonitoredTxStatusFinalized.String() {
+			txStatus != ethtxtypes.MonitoredTxStatusFailed.String() &&
+			txStatus != ethtxtypes.MonitoredTxStatusSafe.String() &&
+			txStatus != ethtxtypes.MonitoredTxStatusFinalized.String() {
 			txPending++
 		}
 	}
@@ -351,7 +352,7 @@ func (s *SequenceSender) syncAllEthTxResults(ctx context.Context) error {
 }
 
 // copyTxData copies tx data in the internal structure
-func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResults map[common.Hash]ethtxmanager.TxResult) {
+func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResults map[common.Hash]ethtxtypes.TxResult) {
 	s.ethTxData[txHash] = make([]byte, len(txData))
 	copy(s.ethTxData[txHash], txData)
 
@@ -371,7 +372,7 @@ func (s *SequenceSender) copyTxData(txHash common.Hash, txData []byte, txsResult
 }
 
 // updateEthTxResult handles updating transaction state
-func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmanager.MonitoredTxResult) {
+func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxtypes.MonitoredTxResult) {
 	if txData.Status != txResult.Status.String() {
 		log.Infof("update transaction %v to state %s", txResult.ID, txResult.Status.String())
 		txData.StatusTimestamp = time.Now()
@@ -380,8 +381,8 @@ func (s *SequenceSender) updateEthTxResult(txData *ethTxData, txResult ethtxmana
 		txData.StateHistory = append(txData.StateHistory, stTrans)
 
 		// Manage according to the state
-		statusConsolidated := txData.Status == ethtxmanager.MonitoredTxStatusSafe.String() || txData.Status == ethtxmanager.MonitoredTxStatusFinalized.String()
-		if txData.Status == ethtxmanager.MonitoredTxStatusFailed.String() {
+		statusConsolidated := txData.Status == ethtxtypes.MonitoredTxStatusSafe.String() || txData.Status == ethtxtypes.MonitoredTxStatusFinalized.String()
+		if txData.Status == ethtxtypes.MonitoredTxStatusFailed.String() {
 			s.logFatalf("transaction %v result failed!")
 		} else if statusConsolidated && txData.ToBatch >= s.latestVirtualBatch {
 			s.latestVirtualTime = txData.StatusTimestamp
@@ -613,7 +614,7 @@ func (s *SequenceSender) sendTx(ctx context.Context, resend bool, txOldHash *com
 	// Add tx to internal structure
 	s.mutexEthTx.Lock()
 	s.ethTransactions[txHash] = &txData
-	txResults := make(map[common.Hash]ethtxmanager.TxResult, 0)
+	txResults := make(map[common.Hash]ethtxtypes.TxResult, 0)
 	s.copyTxData(txHash, paramData, txResults)
 	_ = s.getResultAndUpdateEthTx(ctx, txHash)
 	if !resend {
