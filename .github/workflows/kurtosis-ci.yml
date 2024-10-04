@@ -39,14 +39,24 @@ jobs:
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |
-          yq -Y --in-place '.args.data_availability_mode = "cdk-validium"' cdk-erigon-sequencer-params.yml
-          yq -Y --in-place '.args.zkevm_sequence_sender_image = "zkevm-sequence-sender:local"' cdk-erigon-sequencer-params.yml
+          yq -Y --in-place '.args.data_availability_mode = "cdk-validium"' params.yml
+          yq -Y --in-place '.args.zkevm_sequence_sender_image = "zkevm-sequence-sender:local"' params.yml
 
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file cdk-erigon-sequencer-params.yml --image-download always .
+        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
 
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
         shell: bash
-        run: .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh 19 600
+        run: |
+          rpc_url="$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)"
+
+          # Check if rpc_url is retrieved succesfully
+          if [ -z "$rpc_url" ]; then
+            echo "Error: RPC URL could not be retrieved."
+            exit 1
+          fi
+          
+          # Run the batches verification monitor script
+          .github/scripts/monitor-verified-batches.sh --rpc-url "$rpc_url" --target 19 --timeout 600
