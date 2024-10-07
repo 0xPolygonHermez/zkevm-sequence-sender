@@ -1,7 +1,7 @@
 package sequencesender
 
 import (
-	"github.com/0xPolygonHermez/zkevm-ethtx-manager/ethtxmanager"
+	"github.com/0xPolygon/zkevm-ethtx-manager/ethtxmanager"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/config/types"
 	"github.com/0xPolygonHermez/zkevm-sequence-sender/log"
 	"github.com/ethereum/go-ethereum/common"

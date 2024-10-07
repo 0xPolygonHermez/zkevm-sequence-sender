@@ -12,7 +12,7 @@ Stateless autonomous binary to sequence L2 batches and send them to L1.
 
 - **Datastream server**: The data source is a datastream server, so the SequenceSender connects to the stream server to get information about L2 transactions, blocks, and batches.
 
-- **EthTxManager**: [Library](https://github.com/0xPolygonHermez/zkevm-ethtx-manager) used for sending and monitoring L1 transactions.
+- **EthTxManager**: [Library](https://github.com/0xPolygon/zkevm-ethtx-manager) used for sending and monitoring L1 transactions.
 
 
 ## File
